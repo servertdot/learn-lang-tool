@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import styles from './style.css?inline';
-import { TranslationPopover, type PopoverState } from '@src/components/TranslationPopover';
+import {
+  TranslationPopover,
+  type AnkiAddState,
+  type AnkiViewState,
+  type PopoverState,
+} from '@src/components/TranslationPopover';
 import { extractTextTarget } from '@src/lib/extract-text-target';
 import { createProductTranslationFacade } from '@src/lib/product-translator';
 import { TranslationFacadeError } from '@src/lib/translation-facade';
@@ -16,6 +21,7 @@ import {
 import { getWordAtRange } from '@src/lib/word-at-caret';
 import type { LltMessage } from '@src/lib/extension-messages';
 import { lltLog } from '@src/lib/debug-log';
+import { requestAddToAnki, requestViewInAnki } from '@src/lib/messaging-anki';
 
 const host = document.createElement('div');
 host.id = '__llt-root';
@@ -43,9 +49,13 @@ if (import.meta.hot) {
 interface PopoverData {
   state: PopoverState;
   position: { x: number; y: number };
-  /** Context sentence for a future Anki track — not sent to the translation engine. */
+  /** Context sentence saved to Anki, but never sent to the translation engine. */
   contextSentence: string | null;
   packIdForInstall: string | null;
+  ankiState: AnkiAddState;
+  ankiViewState: AnkiViewState;
+  ankiError: string | null;
+  ankiNoteId: number | null;
 }
 
 function ContentApp() {
@@ -134,6 +144,10 @@ function ContentApp() {
       position: { x, y },
       contextSentence: target.context,
       packIdForInstall: pack?.id ?? null,
+      ankiState: 'idle',
+      ankiViewState: 'idle',
+      ankiError: null,
+      ankiNoteId: null,
     });
 
     try {
@@ -214,6 +228,89 @@ function ContentApp() {
     }
   }, [popover?.packIdForInstall]);
 
+  const handleAddToAnki = useCallback(async () => {
+    if (!popover || popover.state.kind !== 'success') return;
+
+    const { data } = popover.state;
+    setPopover(prev =>
+      prev
+        ? {
+            ...prev,
+            ankiState: 'adding',
+            ankiError: null,
+          }
+        : null,
+    );
+
+    try {
+      const noteId = await requestAddToAnki({
+        expression: data.source_text,
+        reading: '',
+        sentence: popover.contextSentence ?? data.source_text,
+        glossary: data.translated_text,
+      });
+      setPopover(prev =>
+        prev?.state.kind === 'success' && prev.state.data === data
+          ? {
+              ...prev,
+              ankiState: 'added',
+              ankiViewState: 'idle',
+              ankiError: null,
+              ankiNoteId: noteId,
+            }
+          : null,
+      );
+    } catch (err) {
+      setPopover(prev =>
+        prev?.state.kind === 'success' && prev.state.data === data
+          ? {
+              ...prev,
+              ankiState: 'error',
+              ankiError: err instanceof Error ? err.message : 'Could not add the card to Anki.',
+            }
+          : null,
+      );
+    }
+  }, [popover]);
+
+  const handleViewInAnki = useCallback(async () => {
+    if (!popover?.ankiNoteId) return;
+    const noteId = popover.ankiNoteId;
+
+    setPopover(prev =>
+      prev
+        ? {
+            ...prev,
+            ankiViewState: 'opening',
+            ankiError: null,
+          }
+        : null,
+    );
+
+    try {
+      await requestViewInAnki(noteId);
+      setPopover(prev =>
+        prev?.ankiNoteId === noteId
+          ? {
+              ...prev,
+              ankiViewState: 'idle',
+              ankiError: null,
+            }
+          : null,
+      );
+    } catch (err) {
+      setPopover(prev =>
+        prev?.ankiNoteId === noteId
+          ? {
+              ...prev,
+              ankiViewState: 'error',
+              ankiError: err instanceof Error ? err.message : 'Could not open the card in Anki.',
+            }
+          : null,
+      );
+    }
+  }, [popover?.ankiNoteId]);
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.repeat) return;
@@ -250,6 +347,11 @@ function ContentApp() {
     <TranslationPopover
       state={popover.state}
       position={popover.position}
+      onAddToAnki={popover.state.kind === 'success' ? handleAddToAnki : undefined}
+      onViewInAnki={popover.ankiNoteId ? handleViewInAnki : undefined}
+      ankiState={popover.ankiState}
+      ankiViewState={popover.ankiViewState}
+      ankiError={popover.ankiError}
       onInstallModelPack={
         popover.state.kind === 'error' && popover.state.code === 'model_pack_missing'
           ? handleInstallModelPack

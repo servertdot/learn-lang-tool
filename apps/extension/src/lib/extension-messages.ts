@@ -3,6 +3,13 @@
 import type { TranslateRequest, TranslateResponse } from '@package/shared';
 import type { ModelPackStatus } from './model-pack-store';
 import type { TranslationFacadeErrorCode } from './translation-facade';
+import type { AnkiCardContent } from './anki';
+
+export type AnkiAddNoteResponse =
+  | { ok: true; noteId: number }
+  | { ok: false; error: string };
+
+export type AnkiViewNoteResponse = { ok: true } | { ok: false; error: string };
 
 export type LltMessage =
   | { type: 'llt.translate'; requestId: string; request: TranslateRequest }
@@ -26,6 +33,8 @@ export type LltMessage =
     }
   | { type: 'llt.modelPack.install'; packId: string }
   | { type: 'llt.modelPack.cancel'; packId: string }
+  | { type: 'llt.anki.addNote'; content: AnkiCardContent }
+  | { type: 'llt.anki.viewNote'; noteId: number }
   | {
       type: 'llt.modelPack.changed';
       packId: string;

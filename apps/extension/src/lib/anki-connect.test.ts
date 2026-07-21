@@ -1,0 +1,100 @@
+import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_ANKI_SETTINGS, createAnkiNote } from './anki';
+import { addNoteWithAnkiConnect, browseNoteWithAnkiConnect } from './anki-connect';
+
+function jsonResponse(result: unknown, error: string | null = null): Response {
+  return new Response(JSON.stringify({ result, error }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+const note = createAnkiNote(DEFAULT_ANKI_SETTINGS, {
+  expression: 'hello',
+  reading: '',
+  sentence: 'Hello there.',
+  glossary: 'привет',
+});
+
+describe('AnkiConnect client', () => {
+  it('requests origin permission before adding a note', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ permission: 'granted', requireApiKey: false, version: 6 }),
+      )
+      .mockResolvedValueOnce(jsonResponse(12345));
+
+    await expect(
+      addNoteWithAnkiConnect(DEFAULT_ANKI_SETTINGS, note, { fetch: fetchMock }),
+    ).resolves.toBe(12345);
+
+    const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(firstBody).toEqual({ action: 'requestPermission', version: 6 });
+    expect(secondBody).toEqual({
+      action: 'addNote',
+      version: 6,
+      params: { note },
+    });
+  });
+
+  it('stops when Anki denies origin permission', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ permission: 'denied' }));
+    await expect(
+      addNoteWithAnkiConnect(DEFAULT_ANKI_SETTINGS, note, { fetch: fetchMock }),
+    ).rejects.toMatchObject({ code: 'permission_denied' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('reports an API key requirement before adding', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ permission: 'granted', requireApiKey: true, version: 6 }),
+    );
+    await expect(
+      addNoteWithAnkiConnect(DEFAULT_ANKI_SETTINGS, note, { fetch: fetchMock }),
+    ).rejects.toMatchObject({ code: 'api_key_required' });
+  });
+
+  it('rejects a malformed permission response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(null));
+    await expect(
+      addNoteWithAnkiConnect(DEFAULT_ANKI_SETTINGS, note, { fetch: fetchMock }),
+    ).rejects.toMatchObject({ code: 'invalid_response' });
+  });
+
+  it('surfaces AnkiConnect API errors', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ permission: 'granted', requireApiKey: false, version: 6 }),
+      )
+      .mockResolvedValueOnce(jsonResponse(null, 'deck was not found: English'));
+    await expect(
+      addNoteWithAnkiConnect(DEFAULT_ANKI_SETTINGS, note, { fetch: fetchMock }),
+    ).rejects.toMatchObject({
+      code: 'api_error',
+      message: 'deck was not found: English',
+    });
+  });
+
+  it('opens Browse filtered to the created note', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ permission: 'granted', requireApiKey: false, version: 6 }),
+      )
+      .mockResolvedValueOnce(jsonResponse([91, 92]));
+
+    await expect(
+      browseNoteWithAnkiConnect(DEFAULT_ANKI_SETTINGS, 12345, { fetch: fetchMock }),
+    ).resolves.toEqual([91, 92]);
+
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(body).toEqual({
+      action: 'guiBrowse',
+      version: 6,
+      params: { query: 'nid:12345' },
+    });
+  });
+});

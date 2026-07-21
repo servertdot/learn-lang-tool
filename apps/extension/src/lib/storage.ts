@@ -5,11 +5,13 @@ import {
   DEFAULT_HOTKEY,
   DEFAULT_TRANSLATION_PROVIDER,
 } from '@package/shared';
+import { DEFAULT_ANKI_SETTINGS, type AnkiSettings } from './anki';
 
 const KEYS = {
   languagePair: 'languagePair',
   hotkey: 'hotkey',
   translationProvider: 'translationProvider',
+  ankiSettings: 'ankiSettings',
 } as const;
 
 export async function getLanguagePair(): Promise<LanguagePair> {
@@ -40,4 +42,22 @@ export async function getTranslationProvider(): Promise<TranslationProvider> {
 
 export async function setTranslationProvider(provider: TranslationProvider): Promise<void> {
   await browser.storage.sync.set({ [KEYS.translationProvider]: provider });
+}
+
+export async function getAnkiSettings(): Promise<AnkiSettings> {
+  const result = await browser.storage.sync.get(KEYS.ankiSettings);
+  const stored = result[KEYS.ankiSettings] as Partial<AnkiSettings> | undefined;
+  return {
+    ...DEFAULT_ANKI_SETTINGS,
+    ...stored,
+    tags: Array.isArray(stored?.tags) ? stored.tags : DEFAULT_ANKI_SETTINGS.tags,
+    fields: {
+      ...DEFAULT_ANKI_SETTINGS.fields,
+      ...stored?.fields,
+    },
+  };
+}
+
+export async function setAnkiSettings(settings: AnkiSettings): Promise<void> {
+  await browser.storage.sync.set({ [KEYS.ankiSettings]: settings });
 }

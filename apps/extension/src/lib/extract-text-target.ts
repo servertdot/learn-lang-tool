@@ -32,7 +32,11 @@ export function extractTextTarget(
 
   // Phrase mode: selection contains whitespace (more than one token)
   if (normalized.length > 0 && /\s/.test(normalized)) {
-    return { text: normalized, context: null, mode: 'phrase' };
+    return {
+      text: normalized,
+      context: sentenceContext ? normalizeText(sentenceContext) : null,
+      mode: 'phrase',
+    };
   }
 
   // Word mode: explicit single-token selection wins over cursor expansion

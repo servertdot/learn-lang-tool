@@ -13,10 +13,10 @@ describe('extractTextTarget', () => {
       expect(result?.text).toBe('hello world');
     });
 
-    it('ignores wordUnderCursor in phrase mode', () => {
+    it('captures the surrounding sentence but ignores wordUnderCursor in phrase mode', () => {
       const result = extractTextTarget('hello world', 'ignored', 'some sentence');
       expect(result?.mode).toBe('phrase');
-      expect(result?.context).toBeNull();
+      expect(result?.context).toBe('some sentence');
     });
   });
 

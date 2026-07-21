@@ -1,4 +1,9 @@
-import type { LltMessage, OffscreenResponse } from '@src/lib/extension-messages';
+import type {
+  AnkiAddNoteResponse,
+  AnkiViewNoteResponse,
+  LltMessage,
+  OffscreenResponse,
+} from '@src/lib/extension-messages';
 import { createChromeModelPackPersistence } from '@src/lib/model-pack-persistence';
 import { createModelPackStore } from '@src/lib/model-pack-store';
 import { MODEL_PACK_REGISTRY, getModelPackForLanguagePair } from '@src/lib/model-pack-registry';
@@ -7,10 +12,15 @@ import {
   installModelPackFiles,
 } from '@src/lib/model-pack-installer';
 import { lltError, lltLog } from '@src/lib/debug-log';
-import { getTranslationProvider } from '@src/lib/storage';
+import { getAnkiSettings, getTranslationProvider } from '@src/lib/storage';
 import { createGoogleTranslationEngine } from '@src/lib/google-translation-engine';
 import { createTranslationFacade, TranslationFacadeError } from '@src/lib/translation-facade';
 import { MAX_TRANSLATION_TEXT_LENGTH } from '@package/shared';
+import {
+  addNoteWithAnkiConnect,
+  browseNoteWithAnkiConnect,
+} from '@src/lib/anki-connect';
+import { createAnkiNote } from '@src/lib/anki';
 
 const OFFSCREEN_URL = 'src/pages/offscreen/index.html';
 const OFFSCREEN_REASONS = ['WORKERS' as chrome.offscreen.Reason];
@@ -167,6 +177,33 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
         await modelPackStore.markCancelled(message.packId);
         broadcastPackChanged(message.packId, 'missing');
         sendResponse({ ok: true });
+        return;
+      }
+
+      if (message.type === 'llt.anki.addNote') {
+        try {
+          const settings = await getAnkiSettings();
+          const note = createAnkiNote(settings, message.content);
+          const noteId = await addNoteWithAnkiConnect(settings, note);
+          sendResponse({ ok: true, noteId } satisfies AnkiAddNoteResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not add the card to Anki.';
+          lltError('bg', 'Anki add note failed', error);
+          sendResponse({ ok: false, error } satisfies AnkiAddNoteResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.anki.viewNote') {
+        try {
+          const settings = await getAnkiSettings();
+          await browseNoteWithAnkiConnect(settings, message.noteId);
+          sendResponse({ ok: true } satisfies AnkiViewNoteResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not open the card in Anki.';
+          lltError('bg', 'Anki browse note failed', error);
+          sendResponse({ ok: false, error } satisfies AnkiViewNoteResponse);
+        }
         return;
       }
 

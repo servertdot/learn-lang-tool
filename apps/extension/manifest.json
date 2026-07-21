@@ -23,6 +23,8 @@
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'"
   },
   "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
     "https://storage.googleapis.com/*",
     "https://translate.google.com/*"
   ],
