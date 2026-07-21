@@ -6,6 +6,7 @@ import type { TranslationFacadeErrorCode } from './translation-facade';
 
 export type LltMessage =
   | { type: 'llt.translate'; requestId: string; request: TranslateRequest }
+  | { type: 'llt.translate.cancel'; requestId: string }
   | {
       type: 'llt.translate.result';
       requestId: string;

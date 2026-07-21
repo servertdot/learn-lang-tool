@@ -8,7 +8,6 @@ import { TranslationFacadeError } from '@src/lib/translation-facade';
 import { getLanguagePair, getHotkey } from '@src/lib/storage';
 import {
   requestModelPackInstall,
-  requestModelPackStatus,
 } from '@src/lib/messaging-translation-engine';
 import {
   formatApproxSize,
@@ -138,28 +137,6 @@ function ContentApp() {
     });
 
     try {
-      if (pack) {
-        const status = await requestModelPackStatus(pack.id);
-        if (status !== 'ready') {
-          setPopover(prev =>
-            prev
-              ? {
-                  ...prev,
-                  state: {
-                    kind: 'error',
-                    code: 'model_pack_missing',
-                    message:
-                      status === 'failed'
-                        ? 'Model pack download failed. Retry from Options or below.'
-                        : 'Install the translation model pack to translate offline.',
-                  },
-                }
-              : null,
-          );
-          return;
-        }
-      }
-
       const data = await translateFacade.translate(
         { text: target.text, from_code: pair.from_code, to_code: pair.to_code },
         controller.signal,

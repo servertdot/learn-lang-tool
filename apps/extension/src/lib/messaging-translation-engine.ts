@@ -29,7 +29,7 @@ export function createMessagingTranslationEngine(): TranslationEngine {
       const onAbort = () => {
         lltLog('content', 'translate abort', requestId);
         void browser.runtime.sendMessage({
-          type: 'llt.offscreen.abortTranslate',
+          type: 'llt.translate.cancel',
           requestId,
         } satisfies LltMessage);
       };

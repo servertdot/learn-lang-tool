@@ -7,6 +7,10 @@ import {
   installModelPackFiles,
 } from '@src/lib/model-pack-installer';
 import { lltError, lltLog } from '@src/lib/debug-log';
+import { getTranslationProvider } from '@src/lib/storage';
+import { createGoogleTranslationEngine } from '@src/lib/google-translation-engine';
+import { createTranslationFacade, TranslationFacadeError } from '@src/lib/translation-facade';
+import { MAX_TRANSLATION_TEXT_LENGTH } from '@package/shared';
 
 const OFFSCREEN_URL = 'src/pages/offscreen/index.html';
 const OFFSCREEN_REASONS = ['WORKERS' as chrome.offscreen.Reason];
@@ -14,6 +18,10 @@ const OFFSCREEN_JUSTIFICATION =
   'Run the on-device Bergamot translation engine outside content scripts.';
 
 const modelPackStore = createModelPackStore(createChromeModelPackPersistence());
+const googleTranslationFacade = createTranslationFacade(createGoogleTranslationEngine(), {
+  maxLength: MAX_TRANSLATION_TEXT_LENGTH,
+});
+const remoteTranslateAborts = new Map<string, AbortController>();
 
 async function hasOffscreenDocument(): Promise<boolean> {
   const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_URL);
@@ -92,6 +100,20 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
 
   void (async () => {
     try {
+      if (message.type === 'llt.translate.cancel') {
+        remoteTranslateAborts.get(message.requestId)?.abort();
+        void chrome.runtime
+          .sendMessage({
+            type: 'llt.offscreen.abortTranslate',
+            requestId: message.requestId,
+          } satisfies LltMessage)
+          .catch(() => {
+            /* offscreen document may not exist */
+          });
+        sendResponse({ ok: true });
+        return;
+      }
+
       if (message.type === 'llt.modelPack.getStatus') {
         const state = await modelPackStore.getState(message.packId);
         sendResponse({
@@ -149,12 +171,65 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
       }
 
       if (message.type === 'llt.translate') {
+        const remoteController = new AbortController();
+        remoteTranslateAborts.set(message.requestId, remoteController);
+        const provider = await getTranslationProvider();
         lltLog('bg', 'translate →', {
           requestId: message.requestId,
-          text: message.request.text.slice(0, 120),
           textLen: message.request.text.length,
           pair: `${message.request.from_code}→${message.request.to_code}`,
+          provider,
         });
+
+        if (remoteController.signal.aborted) {
+          remoteTranslateAborts.delete(message.requestId);
+          sendResponse({
+            type: 'llt.translate.error',
+            requestId: message.requestId,
+            error: { code: 'engine_failure', message: 'Translation cancelled' },
+          } satisfies LltMessage);
+          return;
+        }
+
+        if (provider === 'google') {
+          try {
+            const result = await googleTranslationFacade.translate(
+              message.request,
+              remoteController.signal,
+            );
+            sendResponse({
+              type: 'llt.translate.result',
+              requestId: message.requestId,
+              result,
+            } satisfies LltMessage);
+          } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+              sendResponse({
+                type: 'llt.translate.error',
+                requestId: message.requestId,
+                error: { code: 'engine_failure', message: 'Translation cancelled' },
+              } satisfies LltMessage);
+            } else {
+              const error =
+                err instanceof TranslationFacadeError
+                  ? err
+                  : new TranslationFacadeError(
+                      'engine_failure',
+                      err instanceof Error ? err.message : 'Google translation failed',
+                    );
+              sendResponse({
+                type: 'llt.translate.error',
+                requestId: message.requestId,
+                error: { code: error.code, message: error.message },
+              } satisfies LltMessage);
+            }
+          } finally {
+            remoteTranslateAborts.delete(message.requestId);
+          }
+          return;
+        }
+
+        remoteTranslateAborts.delete(message.requestId);
 
         const pack = getModelPackForLanguagePair({
           from_code: message.request.from_code,
@@ -218,6 +293,9 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
         sendResponse(errorMsg);
       }
     } catch (err) {
+      if (message.type === 'llt.translate') {
+        remoteTranslateAborts.delete(message.requestId);
+      }
       const error = err instanceof Error ? err.message : 'Background failure';
       lltError('bg', 'handler failed', error);
       sendResponse({ ok: false, error });

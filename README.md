@@ -16,29 +16,29 @@
 
 Yomitan — мощное расширение для language learning: popup-словари, частоты, аудио, экспорт в Anki. Оно опирается на загруженные словари и отлично работает для поиска слов.
 
-Мы хотим похожий UX «перевод прямо на странице + сохранение в Anki», но с акцентом на **перевод фраз и словосочетаний**. Product-path перевод идёт **локально в расширении** через Bergamot (Marian WASM), а не через обязательный удалённый сервер.
+Мы хотим похожий UX «перевод прямо на странице + сохранение в Anki», но с акцентом на **перевод фраз и словосочетаний**. По умолчанию расширение обращается напрямую к Google Translate ради качества; в Options можно выбрать полностью локальный Bergamot (Marian WASM).
 
 | | Yomitan | Learn Lang Tool |
 |---|---|---|
-| Источник смысла | Локальные словари | Локальный MT (Bergamot) для фраз |
+| Источник смысла | Локальные словари | Google Translate или локальный Bergamot для фраз |
 | Сильная сторона | Lookup слова, богатые словарные данные | Перевод словосочетаний и предложений |
 | Anki | Зрелая интеграция | Отдельный трек |
-| Инфра для пользователя | Не нужна | Не нужна после скачивания model pack |
+| Инфра для пользователя | Не нужна | Свой сервер не нужен; offline-режим доступен через Bergamot |
 
 ## Как это работает (product path)
 
 1. На странице выделяешь текст или держишь hotkey над словом.
 2. Content script показывает **translation popover**.
-3. Запрос уходит в **translation facade** → background → offscreen **translation engine** (Bergamot).
-4. Нужен скачанный **model pack** для языковой пары (v1: `en → ru`) — с явным согласием в Options / CTA в popover.
-5. После установки pack перевод работает **offline**. Текст со страницы никуда не уходит.
+3. Запрос уходит в **translation facade** → background, где выбирается сохранённый provider.
+4. По умолчанию текст отправляется напрямую на фиксированный `https://translate.google.com` через минимальный адаптер без npm-зависимостей.
+5. Для приватного режима можно выбрать Bergamot и скачать model pack языковой пары (v1: `en → ru`); тогда перевод работает offline и выделенный текст не покидает устройство.
 
 ```
-┌─────────────────┐     ┌──────────────┐     ┌────────────────┐
-│  Extension UI   │────▶│  Background  │────▶│  Offscreen     │
-│  (popover)      │     │  + model pack│     │  Bergamot WASM │
-│                 │◀────│    status    │◀────│  + Cache API   │
-└─────────────────┘     └──────────────┘     └────────────────┘
+┌─────────────────┐     ┌──────────────────┐     ┌────────────────────┐
+│  Extension UI   │────▶│  Background      │────▶│  Google Translate  │
+│  (popover)      │     │  provider router │     └────────────────────┘
+│                 │◀────│                  │────▶ Offscreen / Bergamot
+└─────────────────┘     └──────────────────┘
 ```
 
 `apps/api` + `apps/translator` остаются в монорепе как **optional translation backend** для разработки/экспериментов и **не нужны** для happy path расширения.
@@ -62,7 +62,7 @@ pnpm install
 pnpm --filter @app/extension dev
 ```
 
-Загрузи unpacked-сборку Chrome из выходной директории Vite (`dist_chrome`). В Options скачай model pack `en→ru` (~15 MB). После этого перевод работает без `api`/`translator`.
+Загрузи unpacked-сборку Chrome из выходной директории Vite (`dist_chrome`). Google выбран по умолчанию. Для offline-режима выбери Bergamot в Options и скачай model pack `en→ru` (~15 MB). Оба режима работают без `api`/`translator`.
 
 Тесты / проверка типов:
 
@@ -80,7 +80,7 @@ pnpm --filter @app/translator dev   # :8000
 pnpm --filter @app/api dev          # :3000
 ```
 
-HTTP-адаптер в коде сохранён, но product facade использует локальный engine.
+HTTP-адаптер в коде сохранён, но текущий product router предлагает Google и Bergamot.
 
 ## Стек
 
@@ -92,4 +92,5 @@ HTTP-адаптер в коде сохранён, но product facade испол
 ## Документы
 
 - [`CONTEXT.md`](CONTEXT.md) — доменный глоссарий
-- [`docs/adr/0001-bergamot-as-translation-engine.md`](docs/adr/0001-bergamot-as-translation-engine.md) — решение про Bergamot
+- [`docs/adr/0001-bergamot-as-translation-engine.md`](docs/adr/0001-bergamot-as-translation-engine.md) — исходное local-first решение
+- [`docs/adr/0002-google-quality-provider.md`](docs/adr/0002-google-quality-provider.md) — Google по умолчанию и Bergamot как offline-режим
