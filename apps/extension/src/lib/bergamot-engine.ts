@@ -5,8 +5,10 @@ import {
 } from '@browsermt/bergamot-translator/translator.js';
 import { BERGAMOT_REGISTRY_URL } from './model-pack-registry';
 
+import { MODEL_CACHE_NAME } from './model-pack-installer';
+
 const MODEL_BASE_URL = 'https://storage.googleapis.com/bergamot-models-sandbox/0.3.3/';
-const CACHE_NAME = 'llt-bergamot-models-v1';
+const CACHE_NAME = MODEL_CACHE_NAME;
 
 /**
  * Bergamot backing for MV3: extension worker URLs + absolute model URLs + Cache API.

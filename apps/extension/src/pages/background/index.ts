@@ -3,6 +3,10 @@ import type { LltMessage, OffscreenResponse } from '@src/lib/extension-messages'
 import { createChromeModelPackPersistence } from '@src/lib/model-pack-persistence';
 import { createModelPackStore } from '@src/lib/model-pack-store';
 import { MODEL_PACK_REGISTRY, getModelPackForLanguagePair } from '@src/lib/model-pack-registry';
+import {
+  cancelModelPackInstall,
+  installModelPackFiles,
+} from '@src/lib/model-pack-installer';
 
 const OFFSCREEN_URL = 'src/pages/offscreen/index.html';
 const OFFSCREEN_REASONS = ['WORKERS' as chrome.offscreen.Reason];
@@ -12,8 +16,10 @@ const OFFSCREEN_JUSTIFICATION =
 const modelPackStore = createModelPackStore(createChromeModelPackPersistence());
 
 async function hasOffscreenDocument(): Promise<boolean> {
+  const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_URL);
   const contexts = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [offscreenUrl],
   });
   return contexts.length > 0;
 }
@@ -31,7 +37,27 @@ async function ensureOffscreenDocument(): Promise<void> {
 
 async function sendToOffscreen(message: LltMessage): Promise<OffscreenResponse> {
   await ensureOffscreenDocument();
-  return (await chrome.runtime.sendMessage(message)) as OffscreenResponse;
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      return (await chrome.runtime.sendMessage(message)) as OffscreenResponse;
+    } catch (err) {
+      lastError = err;
+      const text = err instanceof Error ? err.message : String(err);
+      const transient =
+        text.includes('Receiving end does not exist') ||
+        text.includes('Could not establish connection');
+      if (!transient) {
+        throw err;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Could not reach offscreen translation engine');
 }
 
 function broadcastPackChanged(
@@ -65,125 +91,129 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
   }
 
   void (async () => {
-    if (message.type === 'llt.modelPack.getStatus') {
-      const state = await modelPackStore.getState(message.packId);
-      sendResponse({
-        type: 'llt.modelPack.status',
-        packId: message.packId,
-        status: state?.status ?? 'missing',
-        errorMessage: state?.errorMessage,
-      } satisfies LltMessage);
-      return;
-    }
-
-    if (message.type === 'llt.modelPack.install') {
-      const packById = MODEL_PACK_REGISTRY.find(pack => pack.id === message.packId);
-      if (!packById) {
-        await modelPackStore.markFailed(message.packId, 'Unknown model pack');
-        broadcastPackChanged(message.packId, 'failed', 'Unknown model pack');
-        sendResponse({ ok: false });
+    try {
+      if (message.type === 'llt.modelPack.getStatus') {
+        const state = await modelPackStore.getState(message.packId);
+        sendResponse({
+          type: 'llt.modelPack.status',
+          packId: message.packId,
+          status: state?.status ?? 'missing',
+          errorMessage: state?.errorMessage,
+        } satisfies LltMessage);
         return;
       }
 
-      await modelPackStore.markDownloading(message.packId);
-      broadcastPackChanged(message.packId, 'downloading');
+      if (message.type === 'llt.modelPack.install') {
+        const packById = MODEL_PACK_REGISTRY.find(pack => pack.id === message.packId);
+        if (!packById) {
+          await modelPackStore.markFailed(message.packId, 'Unknown model pack');
+          broadcastPackChanged(message.packId, 'failed', 'Unknown model pack');
+          sendResponse({ ok: false, error: 'Unknown model pack' });
+          return;
+        }
 
-      const response = await sendToOffscreen({
-        type: 'llt.offscreen.install',
-        packId: message.packId,
-      });
+        await modelPackStore.markDownloading(message.packId);
+        broadcastPackChanged(message.packId, 'downloading');
 
-      if (response.ok) {
-        await modelPackStore.markReady(message.packId);
-        broadcastPackChanged(message.packId, 'ready');
+        try {
+          await installModelPackFiles(packById.from_code, packById.to_code);
+          await modelPackStore.markReady(message.packId);
+          broadcastPackChanged(message.packId, 'ready');
+          sendResponse({ ok: true });
+        } catch (err) {
+          const aborted =
+            (err instanceof DOMException && err.name === 'AbortError') ||
+            (err instanceof Error && err.name === 'AbortError');
+
+          if (aborted) {
+            await modelPackStore.markCancelled(message.packId);
+            broadcastPackChanged(message.packId, 'missing');
+            sendResponse({ ok: false, aborted: true });
+            return;
+          }
+
+          const error = err instanceof Error ? err.message : 'Install failed';
+          await modelPackStore.markFailed(message.packId, error);
+          broadcastPackChanged(message.packId, 'failed', error);
+          sendResponse({ ok: false, error });
+        }
+        return;
+      }
+
+      if (message.type === 'llt.modelPack.cancel') {
+        cancelModelPackInstall();
+        await modelPackStore.markCancelled(message.packId);
+        broadcastPackChanged(message.packId, 'missing');
         sendResponse({ ok: true });
         return;
       }
 
-      if (!response.ok && response.aborted) {
-        await modelPackStore.markCancelled(message.packId);
-        broadcastPackChanged(message.packId, 'missing');
-        sendResponse({ ok: false, aborted: true });
-        return;
-      }
+      if (message.type === 'llt.translate') {
+        const pack = getModelPackForLanguagePair({
+          from_code: message.request.from_code,
+          to_code: message.request.to_code,
+        });
 
-      const error = !response.ok ? response.error : 'Install failed';
-      await modelPackStore.markFailed(message.packId, error);
-      broadcastPackChanged(message.packId, 'failed', error);
-      sendResponse({ ok: false, error });
-      return;
-    }
+        if (!pack) {
+          const errorMsg: LltMessage = {
+            type: 'llt.translate.error',
+            requestId: message.requestId,
+            error: {
+              code: 'engine_failure',
+              message: `No model pack for ${message.request.from_code}→${message.request.to_code}`,
+            },
+          };
+          await browser.runtime.sendMessage(errorMsg).catch(() => undefined);
+          sendResponse({ ok: false });
+          return;
+        }
 
-    if (message.type === 'llt.modelPack.cancel') {
-      await sendToOffscreen({ type: 'llt.offscreen.cancelInstall' });
-      await modelPackStore.markCancelled(message.packId);
-      broadcastPackChanged(message.packId, 'missing');
-      sendResponse({ ok: true });
-      return;
-    }
+        const status = await modelPackStore.getStatus(pack.id);
+        if (status !== 'ready') {
+          const errorMsg: LltMessage = {
+            type: 'llt.translate.error',
+            requestId: message.requestId,
+            error: {
+              code: 'model_pack_missing',
+              message: 'Install the translation model pack to translate offline.',
+            },
+          };
+          await browser.runtime.sendMessage(errorMsg).catch(() => undefined);
+          sendResponse({ ok: false });
+          return;
+        }
 
-    if (message.type === 'llt.translate') {
-      const pack = getModelPackForLanguagePair({
-        from_code: message.request.from_code,
-        to_code: message.request.to_code,
-      });
+        const response = await sendToOffscreen({
+          type: 'llt.offscreen.translate',
+          request: message.request,
+          requestId: message.requestId,
+        });
 
-      if (!pack) {
+        if (response.ok && 'result' in response) {
+          const resultMsg: LltMessage = {
+            type: 'llt.translate.result',
+            requestId: message.requestId,
+            result: response.result,
+          };
+          await browser.runtime.sendMessage(resultMsg).catch(() => undefined);
+          sendResponse({ ok: true });
+          return;
+        }
+
         const errorMsg: LltMessage = {
           type: 'llt.translate.error',
           requestId: message.requestId,
           error: {
             code: 'engine_failure',
-            message: `No model pack for ${message.request.from_code}→${message.request.to_code}`,
+            message: !response.ok ? response.error : 'Translation failed',
           },
         };
-        await browser.runtime.sendMessage(errorMsg);
+        await browser.runtime.sendMessage(errorMsg).catch(() => undefined);
         sendResponse({ ok: false });
-        return;
       }
-
-      const status = await modelPackStore.getStatus(pack.id);
-      if (status !== 'ready') {
-        const errorMsg: LltMessage = {
-          type: 'llt.translate.error',
-          requestId: message.requestId,
-          error: {
-            code: 'model_pack_missing',
-            message: 'Install the translation model pack to translate offline.',
-          },
-        };
-        await browser.runtime.sendMessage(errorMsg);
-        sendResponse({ ok: false });
-        return;
-      }
-
-      const response = await sendToOffscreen({
-        type: 'llt.offscreen.translate',
-        request: message.request,
-        requestId: message.requestId,
-      });
-
-      if (response.ok && 'result' in response) {
-        const resultMsg: LltMessage = {
-          type: 'llt.translate.result',
-          requestId: message.requestId,
-          result: response.result,
-        };
-        await browser.runtime.sendMessage(resultMsg);
-        sendResponse({ ok: true });
-        return;
-      }
-
-      const errorMsg: LltMessage = {
-        type: 'llt.translate.error',
-        requestId: message.requestId,
-        error: {
-          code: 'engine_failure',
-          message: !response.ok ? response.error : 'Translation failed',
-        },
-      };
-      await browser.runtime.sendMessage(errorMsg);
-      sendResponse({ ok: false });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Background failure';
+      sendResponse({ ok: false, error });
     }
   })();
 

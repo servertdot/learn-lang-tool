@@ -77,10 +77,17 @@ export async function requestModelPackStatus(packId: string): Promise<ModelPackS
 }
 
 export async function requestModelPackInstall(packId: string): Promise<void> {
-  await browser.runtime.sendMessage({
+  const response = (await browser.runtime.sendMessage({
     type: 'llt.modelPack.install',
     packId,
-  } satisfies LltMessage);
+  } satisfies LltMessage)) as { ok?: boolean; error?: string; aborted?: boolean } | undefined;
+
+  if (!response?.ok) {
+    if (response?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    throw new Error(response?.error || 'Model pack install failed');
+  }
 }
 
 export async function requestModelPackCancel(packId: string): Promise<void> {

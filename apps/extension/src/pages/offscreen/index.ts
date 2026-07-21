@@ -1,22 +1,14 @@
 import type { LltMessage } from '@src/lib/extension-messages';
 import {
   cancelBergamotModelPackInstall,
-  installBergamotModelPack,
   translateWithBergamot,
 } from '@src/lib/bergamot-engine';
 import { translateWithStub } from '@src/lib/translation-stub';
-import { MODEL_PACK_REGISTRY } from '@src/lib/model-pack-registry';
 
 /** Product uses Bergamot; stub remains available for demos via this flag. */
 const TRANSLATION_ENGINE_MODE = 'bergamot' as 'bergamot' | 'stub';
 
 const translateAborts = new Map<string, AbortController>();
-
-function packLanguages(packId: string): { from: string; to: string } | null {
-  const pack = MODEL_PACK_REGISTRY.find(entry => entry.id === packId);
-  if (!pack) return null;
-  return { from: pack.from_code, to: pack.to_code };
-}
 
 chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse) => {
   void (async () => {
@@ -64,17 +56,7 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
         return;
       }
 
-      if (message.type === 'llt.offscreen.install') {
-        const langs = packLanguages(message.packId);
-        if (!langs) {
-          sendResponse({ ok: false as const, error: 'Unknown model pack' });
-          return;
-        }
-        await installBergamotModelPack(langs.from, langs.to);
-        sendResponse({ ok: true as const });
-        return;
-      }
-
+      // Install runs in the service worker; keep cancel hook for safety.
       if (message.type === 'llt.offscreen.cancelInstall') {
         cancelBergamotModelPackInstall();
         sendResponse({ ok: true as const });
