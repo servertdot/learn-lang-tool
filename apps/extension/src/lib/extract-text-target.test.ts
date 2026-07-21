@@ -48,9 +48,10 @@ describe('extractTextTarget', () => {
       expect(result).toBeNull();
     });
 
-    it('returns null for whitespace-only selection and no cursor word', () => {
-      const result = extractTextTarget('   ', null, null);
-      expect(result).toBeNull();
+    it('returns null when extracted word is pathologically long', () => {
+      const huge = 'a'.repeat(100);
+      expect(extractTextTarget(huge, null, null)).toBeNull();
+      expect(extractTextTarget('', huge, 'context')).toBeNull();
     });
   });
 });

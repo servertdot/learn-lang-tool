@@ -1,4 +1,3 @@
-import browser from 'webextension-polyfill';
 import type { LltMessage, OffscreenResponse } from '@src/lib/extension-messages';
 import { createChromeModelPackPersistence } from '@src/lib/model-pack-persistence';
 import { createModelPackStore } from '@src/lib/model-pack-store';
@@ -7,6 +6,7 @@ import {
   cancelModelPackInstall,
   installModelPackFiles,
 } from '@src/lib/model-pack-installer';
+import { lltError, lltLog } from '@src/lib/debug-log';
 
 const OFFSCREEN_URL = 'src/pages/offscreen/index.html';
 const OFFSCREEN_REASONS = ['WORKERS' as chrome.offscreen.Reason];
@@ -149,6 +149,13 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
       }
 
       if (message.type === 'llt.translate') {
+        lltLog('bg', 'translate →', {
+          requestId: message.requestId,
+          text: message.request.text.slice(0, 120),
+          textLen: message.request.text.length,
+          pair: `${message.request.from_code}→${message.request.to_code}`,
+        });
+
         const pack = getModelPackForLanguagePair({
           from_code: message.request.from_code,
           to_code: message.request.to_code,
@@ -163,12 +170,12 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
               message: `No model pack for ${message.request.from_code}→${message.request.to_code}`,
             },
           };
-          await browser.runtime.sendMessage(errorMsg).catch(() => undefined);
-          sendResponse({ ok: false });
+          sendResponse(errorMsg);
           return;
         }
 
         const status = await modelPackStore.getStatus(pack.id);
+        lltLog('bg', 'model pack status', pack.id, status);
         if (status !== 'ready') {
           const errorMsg: LltMessage = {
             type: 'llt.translate.error',
@@ -178,16 +185,17 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
               message: 'Install the translation model pack to translate offline.',
             },
           };
-          await browser.runtime.sendMessage(errorMsg).catch(() => undefined);
-          sendResponse({ ok: false });
+          sendResponse(errorMsg);
           return;
         }
 
+        lltLog('bg', 'offscreen translate…');
         const response = await sendToOffscreen({
           type: 'llt.offscreen.translate',
           request: message.request,
           requestId: message.requestId,
         });
+        lltLog('bg', 'offscreen ←', response);
 
         if (response.ok && 'result' in response) {
           const resultMsg: LltMessage = {
@@ -195,8 +203,7 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
             requestId: message.requestId,
             result: response.result,
           };
-          await browser.runtime.sendMessage(resultMsg).catch(() => undefined);
-          sendResponse({ ok: true });
+          sendResponse(resultMsg);
           return;
         }
 
@@ -208,11 +215,11 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
             message: !response.ok ? response.error : 'Translation failed',
           },
         };
-        await browser.runtime.sendMessage(errorMsg).catch(() => undefined);
-        sendResponse({ ok: false });
+        sendResponse(errorMsg);
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : 'Background failure';
+      lltError('bg', 'handler failed', error);
       sendResponse({ ok: false, error });
     }
   })();
@@ -220,4 +227,4 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
   return true;
 });
 
-console.log('background script loaded');
+lltLog('bg', 'service worker loaded');

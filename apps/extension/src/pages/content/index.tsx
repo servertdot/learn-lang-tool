@@ -6,7 +6,6 @@ import { extractTextTarget } from '@src/lib/extract-text-target';
 import { createProductTranslationFacade } from '@src/lib/product-translator';
 import { TranslationFacadeError } from '@src/lib/translation-facade';
 import { getLanguagePair, getHotkey } from '@src/lib/storage';
-import { normalizeText } from '@src/lib/normalize-text';
 import {
   requestModelPackInstall,
   requestModelPackStatus,
@@ -15,7 +14,9 @@ import {
   formatApproxSize,
   getModelPackForLanguagePair,
 } from '@src/lib/model-pack-registry';
+import { getWordAtRange } from '@src/lib/word-at-caret';
 import type { LltMessage } from '@src/lib/extension-messages';
+import { lltLog } from '@src/lib/debug-log';
 
 const host = document.createElement('div');
 host.id = '__llt-root';
@@ -38,51 +39,6 @@ if (import.meta.hot) {
   import.meta.hot.accept('./style.css?inline', mod => {
     if (mod?.default) styleEl.textContent = mod.default;
   });
-}
-
-function extractSentenceAround(text: string, wordOffset: number): string {
-  const sentenceRe = /[^.!?]*[.!?]*/g;
-  let match: RegExpExecArray | null;
-  let accumulated = 0;
-  while ((match = sentenceRe.exec(text)) !== null) {
-    const segment = match[0];
-    accumulated += segment.length;
-    if (accumulated >= wordOffset) {
-      return normalizeText(segment) || normalizeText(text);
-    }
-  }
-  return normalizeText(text);
-}
-
-function getWordUnderCursor(): { word: string | null; sentence: string | null } {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return { word: null, sentence: null };
-
-  const range = sel.getRangeAt(0);
-
-  let node: Node = range.startContainer;
-  if (node.nodeType !== Node.TEXT_NODE) {
-    const firstText = node.firstChild;
-    if (!firstText || firstText.nodeType !== Node.TEXT_NODE) return { word: null, sentence: null };
-    node = firstText;
-  }
-
-  const text = node.textContent ?? '';
-  const offset = range.startOffset;
-
-  let start = offset;
-  let end = offset;
-  while (start > 0 && !/\s/.test(text[start - 1])) start--;
-  while (end < text.length && !/\s/.test(text[end])) end++;
-
-  const word = text.slice(start, end).trim() || null;
-
-  const el = (node as Text).parentElement;
-  const fullText = el?.textContent ?? '';
-  const absoluteOffset = fullText.indexOf(text) + offset;
-  const sentence = fullText ? extractSentenceAround(fullText, absoluteOffset) : null;
-
-  return { word, sentence };
 }
 
 interface PopoverData {
@@ -143,9 +99,17 @@ function ContentApp() {
   const showPopover = useCallback(async () => {
     const sel = window.getSelection();
     const selectionText = sel?.toString() ?? '';
-
-    const { word, sentence } = getWordUnderCursor();
+    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    const { word, sentence } = range
+      ? getWordAtRange(range)
+      : { word: null, sentence: null };
     const target = extractTextTarget(selectionText, word, sentence);
+    lltLog('content', 'text target', {
+      selectionText: selectionText.slice(0, 120),
+      word,
+      sentence: sentence?.slice(0, 120) ?? null,
+      target,
+    });
     if (!target) return;
 
     contextRef.current = target.context;

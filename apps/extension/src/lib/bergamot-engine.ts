@@ -6,6 +6,7 @@ import {
 import { BERGAMOT_REGISTRY_URL, bergamotModelFileUrl } from './model-pack-registry';
 
 import { MODEL_CACHE_NAME } from './model-pack-installer';
+import { lltError, lltLog } from './debug-log';
 
 const CACHE_NAME = MODEL_CACHE_NAME;
 
@@ -20,6 +21,7 @@ export class ExtensionBergamotBacking extends TranslatorBacking {
       registryUrl: BERGAMOT_REGISTRY_URL,
       pivotLanguage: null,
       downloadTimeout: 120_000,
+      onerror: (err: Error) => lltError('bergamot', 'backing onerror', err),
       ...options,
     });
   }
@@ -34,6 +36,7 @@ export class ExtensionBergamotBacking extends TranslatorBacking {
 
   async loadWorker() {
     const workerUrl = chrome.runtime.getURL('bergamot/translator-worker.js');
+    lltLog('bergamot', 'loadWorker', workerUrl);
     const worker = new Worker(workerUrl);
 
     let serial = 0;
@@ -46,9 +49,17 @@ export class ExtensionBergamotBacking extends TranslatorBacking {
       }
     >();
 
+    const rejectAll = (err: Error) => {
+      for (const [, entry] of pending) {
+        entry.reject(err);
+      }
+      pending.clear();
+    };
+
     const call = (name: string, ...args: unknown[]) =>
       new Promise((accept, reject) => {
         const id = ++serial;
+        lltLog('bergamot', 'worker call →', name, id);
         pending.set(id, {
           accept,
           reject,
@@ -72,6 +83,7 @@ export class ExtensionBergamotBacking extends TranslatorBacking {
       const { accept, reject, callsite } = pending.get(id)!;
       pending.delete(id);
       if (error !== undefined) {
+        lltError('bergamot', 'worker error ←', id, error.message);
         reject(
           Object.assign(new Error(), error, {
             message: `${error.message} (response to ${callsite.message})`,
@@ -79,15 +91,30 @@ export class ExtensionBergamotBacking extends TranslatorBacking {
           }),
         );
       } else {
+        lltLog('bergamot', 'worker ok ←', id);
         accept(result);
       }
     });
 
     worker.addEventListener('error', event => {
-      this.onerror(new Error(event.message || 'Bergamot worker error'));
+      const err = new Error(event.message || 'Bergamot worker error');
+      lltError('bergamot', 'worker event error', event.message, event.filename, event.lineno);
+      rejectAll(err);
+      this.onerror(err);
     });
 
-    await call('initialize', this.options);
+    worker.addEventListener('messageerror', event => {
+      const err = new Error('Bergamot worker messageerror (structured clone failed)');
+      lltError('bergamot', 'worker messageerror', event);
+      rejectAll(err);
+      this.onerror(err);
+    });
+
+    await call('initialize', {
+      cacheSize: 0,
+      useNativeIntGemm: false,
+    });
+    lltLog('bergamot', 'worker initialized');
 
     return {
       worker,
@@ -105,7 +132,11 @@ export class ExtensionBergamotBacking extends TranslatorBacking {
     };
   }
 
-  async fetch(url: string, checksum: string | undefined, extra?: { signal?: AbortSignal }) {
+  /**
+   * Never use subresource integrity against GCS — compressed/encoded bodies
+   * break SRI even when the model bytes are fine. Prefer Cache API.
+   */
+  async fetch(url: string, _checksum: string | undefined, extra?: { signal?: AbortSignal }) {
     let absolute = url;
     if (!url.startsWith('http')) {
       if (!this.currentPair) {
@@ -120,24 +151,59 @@ export class ExtensionBergamotBacking extends TranslatorBacking {
     const cache = await caches.open(CACHE_NAME);
     const cached = await cache.match(absolute);
     if (cached) {
+      lltLog('bergamot', 'cache hit', absolute);
       return cached.arrayBuffer();
     }
 
-    const buffer = await super.fetch(absolute, checksum, extra);
-    await cache.put(absolute, new Response(buffer.slice(0), {
-      headers: { 'Content-Type': 'application/octet-stream' },
-    }));
-    return buffer;
+    lltLog('bergamot', 'cache miss, downloading', absolute);
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    const timeout = setTimeout(onAbort, this.downloadTimeout || 120_000);
+    extra?.signal?.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      const response = await fetch(absolute, {
+        credentials: 'omit',
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to download ${absolute} (${response.status})`);
+      }
+      const buffer = await response.arrayBuffer();
+      await cache.put(
+        absolute,
+        new Response(buffer.slice(0), {
+          headers: { 'Content-Type': 'application/octet-stream' },
+        }),
+      );
+      return buffer;
+    } finally {
+      clearTimeout(timeout);
+      extra?.signal?.removeEventListener('abort', onAbort);
+    }
   }
 }
 
 let translatorPromise: Promise<LatencyOptimisedTranslator> | null = null;
 let installAbort: AbortController | null = null;
 
+/**
+ * Create translator and wait until the WASM worker finishes initialize().
+ * LatencyOptimisedTranslator otherwise swallows worker load failures in notify().
+ */
 function getTranslator(): Promise<LatencyOptimisedTranslator> {
   if (!translatorPromise) {
-    const backing = new ExtensionBergamotBacking();
-    translatorPromise = Promise.resolve(new LatencyOptimisedTranslator({}, backing));
+    translatorPromise = (async () => {
+      const backing = new ExtensionBergamotBacking();
+      const translator = new LatencyOptimisedTranslator({}, backing);
+      lltLog('bergamot', 'waiting for worker…');
+      await translator.worker;
+      lltLog('bergamot', 'worker ready');
+      return translator;
+    })().catch(err => {
+      translatorPromise = null;
+      throw err;
+    });
   }
   return translatorPromise;
 }
@@ -174,16 +240,28 @@ export function cancelBergamotModelPackInstall(): void {
   installAbort?.abort();
 }
 
+/** Warm WASM worker as soon as the offscreen document loads. */
+export async function warmBergamotEngine(): Promise<void> {
+  await getTranslator();
+}
+
 export async function translateWithBergamot(
   text: string,
   from: string,
   to: string,
   signal?: AbortSignal,
 ): Promise<string> {
+  lltLog('bergamot', 'translateWithBergamot', { from, to, textLen: text.length });
+  if (signal?.aborted) {
+    throw new CancelledError('abort signal');
+  }
+
   const translator = await getTranslator();
   const response = await translator.translate(
     { from, to, text, html: false },
     { signal },
   );
-  return response.target.text as string;
+  const out = response.target.text as string;
+  lltLog('bergamot', 'translateWithBergamot done', out.slice(0, 120));
+  return out;
 }

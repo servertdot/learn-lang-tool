@@ -26,6 +26,8 @@ declare module '@browsermt/bergamot-translator/translator.js' {
 
   export class LatencyOptimisedTranslator {
     backing: TranslatorBacking;
+    /** Resolves when the WASM worker has finished initialize(). */
+    worker: Promise<{ worker: Worker; exports: unknown; idle: boolean }>;
     constructor(options?: Record<string, unknown>, backing?: TranslatorBacking);
     translate(
       request: { from: string; to: string; text: string; html?: boolean },

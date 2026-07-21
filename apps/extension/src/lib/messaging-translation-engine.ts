@@ -4,6 +4,7 @@ import type { LltMessage } from './extension-messages';
 import type { TranslationEngine } from './translation-facade';
 import { TranslationFacadeError } from './translation-facade';
 import type { ModelPackStatus } from './model-pack-store';
+import { lltError, lltLog } from './debug-log';
 
 function newRequestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -13,53 +14,63 @@ export function createMessagingTranslationEngine(): TranslationEngine {
   return {
     async translate(request: TranslateRequest, signal?: AbortSignal): Promise<TranslateResponse> {
       const requestId = newRequestId();
+      lltLog('content', 'translate →', {
+        requestId,
+        from: request.from_code,
+        to: request.to_code,
+        text: request.text.slice(0, 120),
+        textLen: request.text.length,
+      });
 
-      return new Promise((resolve, reject) => {
-        const onMessage = (message: unknown) => {
-          const msg = message as LltMessage;
-          if (msg.type === 'llt.translate.result' && msg.requestId === requestId) {
-            cleanup();
-            resolve(msg.result);
+      if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
+      const onAbort = () => {
+        lltLog('content', 'translate abort', requestId);
+        void browser.runtime.sendMessage({
+          type: 'llt.offscreen.abortTranslate',
+          requestId,
+        } satisfies LltMessage);
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+
+      try {
+        // Result must come via sendResponse. runtime.sendMessage broadcasts from the
+        // service worker do not reliably reach content scripts.
+        const response = (await browser.runtime.sendMessage({
+          type: 'llt.translate',
+          requestId,
+          request,
+        } satisfies LltMessage)) as LltMessage | { ok?: boolean; error?: string } | undefined;
+
+        lltLog('content', 'translate ←', response);
+
+        if (response && typeof response === 'object' && 'type' in response) {
+          if (response.type === 'llt.translate.result') {
+            return response.result;
           }
-          if (msg.type === 'llt.translate.error' && msg.requestId === requestId) {
-            cleanup();
-            reject(new TranslationFacadeError(msg.error.code, msg.error.message));
+          if (response.type === 'llt.translate.error') {
+            throw new TranslationFacadeError(response.error.code, response.error.message);
           }
-        };
-
-        const onAbort = () => {
-          void browser.runtime.sendMessage({
-            type: 'llt.offscreen.abortTranslate',
-            requestId,
-          } satisfies LltMessage);
-          cleanup();
-          reject(new DOMException('Aborted', 'AbortError'));
-        };
-
-        const cleanup = () => {
-          browser.runtime.onMessage.removeListener(onMessage);
-          signal?.removeEventListener('abort', onAbort);
-        };
-
-        if (signal?.aborted) {
-          reject(new DOMException('Aborted', 'AbortError'));
-          return;
         }
 
-        signal?.addEventListener('abort', onAbort, { once: true });
-        browser.runtime.onMessage.addListener(onMessage);
-
-        const outbound: LltMessage = { type: 'llt.translate', requestId, request };
-        void browser.runtime.sendMessage(outbound).catch(err => {
-          cleanup();
-          reject(
-            new TranslationFacadeError(
-              'engine_failure',
-              err instanceof Error ? err.message : 'Messaging failed',
-            ),
-          );
-        });
-      });
+        const fallback =
+          response && typeof response === 'object' && 'error' in response
+            ? String(response.error)
+            : 'Empty translation response from background';
+        throw new TranslationFacadeError('engine_failure', fallback);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') throw err;
+        if (err instanceof TranslationFacadeError) throw err;
+        lltError('content', 'translate failed', err);
+        throw new TranslationFacadeError(
+          'engine_failure',
+          err instanceof Error ? err.message : 'Messaging failed',
+        );
+      } finally {
+        signal?.removeEventListener('abort', onAbort);
+      }
     },
   };
 }
