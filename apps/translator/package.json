@@ -1,0 +1,11 @@
+{
+  "name": "@app/translator",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "models:install": "poetry run python scripts/install_models.py",
+    "dev": "poetry run fastapi dev translator/main.py",
+    "start": "poetry run fastapi run translator/main.py --host 127.0.0.1 --port 8000"
+  },
+  "packageManager": "pnpm@10.4.1"
+}

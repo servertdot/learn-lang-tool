@@ -1,0 +1,24 @@
+[project]
+name = "translator"
+version = "0.1.0"
+
+description = ""
+authors = [
+    {name = "Andrey Astafev",email = "servertdot@gmail.com"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "argostranslate (>=1.11.0,<2.0.0)",
+    "fastapi[standard] (>=0.139.2,<0.140.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.scripts]
+translator = "translator.main:app"
