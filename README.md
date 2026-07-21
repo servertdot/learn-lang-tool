@@ -14,93 +14,82 @@
 
 Проект в каком-то смысле — альтернатива [Yomitan](https://github.com/yomidevs/yomitan) ([документация](https://yomitan.wiki/)).
 
-Yomitan — мощное расширение для language learning: popup-словари, частоты, аудио, экспорт в Anki. Оно опирается на загруженные словари и отлично работает для поиска слов (особенно для японского и других языков с сильной словарной экосистемой).
+Yomitan — мощное расширение для language learning: popup-словари, частоты, аудио, экспорт в Anki. Оно опирается на загруженные словари и отлично работает для поиска слов.
 
-Мы хотим похожий UX «перевод прямо на странице + сохранение в Anki», но с акцентом на **перевод фраз и словосочетаний**, а не только словарный lookup отдельных слов. Перевод идёт через собственный backend с машинным переводчиком, а не через локальные словарные пакеты.
+Мы хотим похожий UX «перевод прямо на странице + сохранение в Anki», но с акцентом на **перевод фраз и словосочетаний**. Product-path перевод идёт **локально в расширении** через Bergamot (Marian WASM), а не через обязательный удалённый сервер.
 
 | | Yomitan | Learn Lang Tool |
 |---|---|---|
-| Источник смысла | Локальные словари | Машинный перевод фраз |
+| Источник смысла | Локальные словари | Локальный MT (Bergamot) для фраз |
 | Сильная сторона | Lookup слова, богатые словарные данные | Перевод словосочетаний и предложений |
-| Anki | Зрелая интеграция | Планируется / в разработке |
-| Фокус | Много языков (в т.ч. японский) | В первую очередь английский → русский |
+| Anki | Зрелая интеграция | Отдельный трек |
+| Инфра для пользователя | Не нужна | Не нужна после скачивания model pack |
 
-## Как это работает
+## Как это работает (product path)
 
-1. На странице выделяешь текст (слово, фразу или предложение) или держишь hotkey над словом.
-2. Content script расширения показывает **translation popover** рядом с выделением.
-3. Запрос уходит в API (`POST /translate`).
-4. API проксирует перевод в сервис translator (Argos Translate).
-5. В popover появляются оригинал и перевод; если результат Anki-eligible — можно добавить карточку.
+1. На странице выделяешь текст или держишь hotkey над словом.
+2. Content script показывает **translation popover**.
+3. Запрос уходит в **translation facade** → background → offscreen **translation engine** (Bergamot).
+4. Нужен скачанный **model pack** для языковой пары (v1: `en → ru`) — с явным согласием в Options / CTA в popover.
+5. После установки pack перевод работает **offline**. Текст со страницы никуда не уходит.
 
 ```
 ┌─────────────────┐     ┌──────────────┐     ┌────────────────┐
-│  Extension      │────▶│  API         │────▶│  Translator    │
-│  (content UI)   │     │  (Fastify)   │     │  (FastAPI +    │
-│                 │◀────│  :3000       │◀────│   Argos) :8000 │
-└────────┬────────┘     └──────────────┘     └────────────────┘
-         │
-         ▼
-   Anki (карточки)  ← в планах / интеграции
+│  Extension UI   │────▶│  Background  │────▶│  Offscreen     │
+│  (popover)      │     │  + model pack│     │  Bergamot WASM │
+│                 │◀────│    status    │◀────│  + Cache API   │
+└─────────────────┘     └──────────────┘     └────────────────┘
 ```
 
-## Монорепа
+`apps/api` + `apps/translator` остаются в монорепе как **optional translation backend** для разработки/экспериментов и **не нужны** для happy path расширения.
 
-Репозиторий — **pnpm workspace** (`apps/*`, `packages/*`). Общие типы и константы живут в одном месте, приложения зависят друг от друга через `workspace:`.
+## Монорепа
 
 ```
 learn-lang-tool/
 ├── apps/
-│   ├── extension/   # Chrome/Firefox расширение (React + Vite + Tailwind)
-│   ├── api/         # Fastify BFF: /health, /translate
-│   └── translator/  # FastAPI + Argos Translate (локальный MT)
+│   ├── extension/   # Chrome MV3 расширение (React + Vite + Tailwind + Bergamot)
+│   ├── api/         # Optional Fastify BFF (не обязателен для product path)
+│   └── translator/  # Optional FastAPI + Argos (не обязателен для product path)
 └── packages/
-    └── shared/      # Общие типы (TranslateRequest/Response), дефолты, API_BASE_URL
+    └── shared/      # TranslateRequest/Response, language pair defaults, limits
 ```
 
-### `apps/extension`
-
-Content script на странице: selection / hold-to-translate, popover с переводом, настройки языковой пары (`en → ru` по умолчанию). Собирается через Vite (`@crxjs/vite-plugin`), есть сборки под Chrome и Firefox.
-
-### `apps/api`
-
-Тонкий backend на Fastify. Принимает запросы от расширения, валидирует тело, ходит в translator и возвращает единый контракт ответа (включая флаг `can_add_to_anki`).
-
-### `apps/translator`
-
-Отдельный Python-сервис на FastAPI. Делает машинный перевод через Argos Translate. API не знает деталей модели — только HTTP-клиент к этому сервису.
-
-### `packages/shared`
-
-Общий контракт между extension и API: `TranslateRequest`, `TranslateResponse`, `LanguagePair`, `DEFAULT_HOTKEY`, `API_BASE_URL`.
-
-## Локальный запуск
-
-Нужны Node.js, [pnpm](https://pnpm.io/) и Poetry (для translator).
+## Локальный запуск (расширение)
 
 ```bash
 pnpm install
-
-# модели для Argos (один раз)
-pnpm --filter @app/translator models:install
-
-# все dev-сервисы параллельно (extension + api + translator)
-pnpm dev
+pnpm --filter @app/extension dev
 ```
 
-Или по отдельности:
+Загрузи unpacked-сборку Chrome из выходной директории Vite (`dist_chrome`). В Options скачай model pack `en→ru` (~15 MB). После этого перевод работает без `api`/`translator`.
+
+Тесты / проверка типов:
 
 ```bash
-pnpm --filter @app/translator dev   # :8000
-pnpm --filter @app/api dev          # :3000
-pnpm --filter @app/extension dev    # Vite + hot reload расширения
+pnpm --filter @app/extension test
+pnpm --filter @app/extension typecheck
+pnpm --filter @app/extension lint
 ```
 
-После старта extension загрузи unpacked-сборку в Chrome/Firefox из выходной директории Vite (см. `apps/extension`).
+### Optional backend (необязательно)
+
+```bash
+pnpm --filter @app/translator models:install
+pnpm --filter @app/translator dev   # :8000
+pnpm --filter @app/api dev          # :3000
+```
+
+HTTP-адаптер в коде сохранён, но product facade использует локальный engine.
 
 ## Стек
 
-- **Extension:** React 19, TypeScript, Vite, Tailwind CSS, Manifest V3
-- **API:** Fastify, TypeScript
-- **Translator:** FastAPI, Argos Translate, Poetry
+- **Extension:** React 19, TypeScript, Vite, Tailwind CSS, Manifest V3, Bergamot WASM
+- **Optional API:** Fastify, TypeScript
+- **Optional Translator:** FastAPI, Argos Translate, Poetry
 - **Монорепа:** pnpm workspaces
+
+## Документы
+
+- [`CONTEXT.md`](CONTEXT.md) — доменный глоссарий
+- [`docs/adr/0001-bergamot-as-translation-engine.md`](docs/adr/0001-bergamot-as-translation-engine.md) — решение про Bergamot

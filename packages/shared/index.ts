@@ -24,6 +24,9 @@ export const DEFAULT_LANGUAGE_PAIR: LanguagePair = {
 
 export const DEFAULT_HOTKEY = 'Alt';
 
-// For local development, `apps/api` defaults to port 3000 (see apps/api/src/index.ts).
-// Keep this in sync with manifest host_permissions in apps/extension/manifest.json.
+/** Max characters accepted in a translation request on the product path. */
+export const MAX_TRANSLATION_TEXT_LENGTH = 2000;
+
+// Optional translation backend (dev / experiments). Not required for the Bergamot product path.
+// Keep in sync with optional host_permissions if the HTTP adapter is used.
 export const API_BASE_URL = 'http://localhost:3000';

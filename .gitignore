@@ -54,6 +54,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# generated Bergamot worker assets (copied on postinstall)
+apps/extension/public/bergamot/*
+!apps/extension/public/bergamot/.gitkeep
+
 # scripts/
 # .dependency-cruiser.cjs
 # .dependency-cruiser-detailed.cjs

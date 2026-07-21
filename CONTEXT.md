@@ -1,6 +1,6 @@
 # Learn Lang Tool
 
-Monorepo for language learning: browser extension for in-context translation, Fastify API, and Anki integration.
+Browser extension for in-context language learning: translate selections on the page, and later save phrases to Anki. Product translation runs locally in the extension; an optional HTTP translation backend may exist in the monorepo but is not part of the required runtime.
 
 ## Language
 
@@ -13,27 +13,39 @@ The text the user has highlighted on a web page before invoking translation.
 _Avoid_: query, lookup target
 
 **Language pair**:
-The configured source (`from_code`) and target (`to_code`) languages for translation.
+The configured source (`from_code`) and target (`to_code`) languages for translation. v1 ships `en → ru`; the model must allow adding further pairs later without redesigning the product flow.
 _Avoid_: locale pair, direction
 
 **Translation request**:
-A request to translate a selection using the configured language pair.
+A request to translate a selection or the word under the cursor using the configured language pair. The text sent for translation is exactly that selection or word — not an expanded sentence.
 _Avoid_: lookup, query
 
 **Translation result**:
-The response from the API containing the original text, translated text, language codes, and whether the item can be added to Anki.
-_Avoid_: translation response, lookup result
+The outcome of a translation request: original text, translated text, language codes, and whether the item is Anki-eligible.
+_Avoid_: translation response, lookup result, API response
+
+**Translation engine**:
+The on-device runtime inside the extension that fulfills translation requests (product path).
+_Avoid_: translator service, API, backend translator
+
+**Model pack**:
+The downloadable assets for one language pair that the translation engine needs before it can translate. Installed with explicit user consent; after install, translation works offline.
+_Avoid_: dictionary, language pack (ambiguous with UI i18n)
+
+**Context sentence**:
+The surrounding sentence captured alongside a word or phrase for later Anki use. It is not sent to the translation engine unless the user selected that sentence themselves.
+_Avoid_: context, surrounding text, example sentence
 
 **Anki-eligible**:
-A translation result where `can_add_to_anki` is true, meaning the user may save it as a flashcard.
+A translation result where `can_add_to_anki` is true, meaning the user may save it as a flashcard (after optional edit). Anki integration itself is a separate track from the translation engine.
 _Avoid_: anki-ready, cardable
 
 **Phrase translation**:
-Translation mode where the user has explicitly selected multiple words; the selection itself is sent as `text`, with no context expansion.
+Translation mode where the user has explicitly selected multiple words; the selection itself is the translation request text.
 _Avoid_: multi-word lookup
 
 **Word translation**:
-Translation mode where the user selects a single word or has nothing selected but holds the hotkey; the word under the cursor is detected, and the surrounding sentence is captured for context.
+Translation mode where the user selects a single word or has nothing selected but holds the hotkey; the word under the cursor is the translation request text, and the context sentence is captured separately for Anki.
 _Avoid_: hover translation, auto-detect translation
 
 **Language pair settings**:
@@ -43,3 +55,7 @@ _Avoid_: locale settings, language config
 **Hold-to-translate**:
 The interaction where the user holds a configured hotkey while text is selected or the cursor is over a word; the translation popover is shown while the key is held and dismissed on release.
 _Avoid_: press-to-translate, toggle translate
+
+**Optional translation backend**:
+HTTP translation services kept in the monorepo for development or future use, not required for the product translation path.
+_Avoid_: required API, primary translator

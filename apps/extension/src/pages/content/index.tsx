@@ -1,15 +1,21 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import styles from './style.css?inline';
 import { TranslationPopover, type PopoverState } from '@src/components/TranslationPopover';
 import { extractTextTarget } from '@src/lib/extract-text-target';
-import { translate, TranslationApiError } from '@src/lib/translation-api-client';
+import { createProductTranslationFacade } from '@src/lib/product-translator';
+import { TranslationFacadeError } from '@src/lib/translation-facade';
 import { getLanguagePair, getHotkey } from '@src/lib/storage';
 import { normalizeText } from '@src/lib/normalize-text';
-
-// ── DOM host ──────────────────────────────────────────────────────────────────
-// Styles must be injected into the shadow root — Vite's default CSS import
-// puts them in document.head, which cannot pierce Shadow DOM.
+import {
+  requestModelPackInstall,
+  requestModelPackStatus,
+} from '@src/lib/messaging-translation-engine';
+import {
+  formatApproxSize,
+  getModelPackForLanguagePair,
+} from '@src/lib/model-pack-registry';
+import type { LltMessage } from '@src/lib/extension-messages';
 
 const host = document.createElement('div');
 host.id = '__llt-root';
@@ -26,6 +32,7 @@ const mountPoint = document.createElement('div');
 shadowRoot.appendChild(mountPoint);
 
 const root = createRoot(mountPoint);
+const translateFacade = createProductTranslationFacade();
 
 if (import.meta.hot) {
   import.meta.hot.accept('./style.css?inline', mod => {
@@ -33,10 +40,7 @@ if (import.meta.hot) {
   });
 }
 
-// ── Sentence extraction ───────────────────────────────────────────────────────
-
 function extractSentenceAround(text: string, wordOffset: number): string {
-  // Split on sentence-ending punctuation; find the sentence containing offset
   const sentenceRe = /[^.!?]*[.!?]*/g;
   let match: RegExpExecArray | null;
   let accumulated = 0;
@@ -50,15 +54,12 @@ function extractSentenceAround(text: string, wordOffset: number): string {
   return normalizeText(text);
 }
 
-// ── Word / sentence detection ─────────────────────────────────────────────────
-
 function getWordUnderCursor(): { word: string | null; sentence: string | null } {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return { word: null, sentence: null };
 
   const range = sel.getRangeAt(0);
 
-  // Walk up to find first text node when caret lands on an element node
   let node: Node = range.startContainer;
   if (node.nodeType !== Node.TEXT_NODE) {
     const firstText = node.firstChild;
@@ -78,32 +79,65 @@ function getWordUnderCursor(): { word: string | null; sentence: string | null } 
 
   const el = (node as Text).parentElement;
   const fullText = el?.textContent ?? '';
-  // Approximate absolute offset within element text for sentence extraction
   const absoluteOffset = fullText.indexOf(text) + offset;
   const sentence = fullText ? extractSentenceAround(fullText, absoluteOffset) : null;
 
   return { word, sentence };
 }
 
-// ── Content script app ────────────────────────────────────────────────────────
-
 interface PopoverData {
   state: PopoverState;
   position: { x: number; y: number };
+  /** Context sentence for a future Anki track — not sent to the translation engine. */
+  contextSentence: string | null;
+  packIdForInstall: string | null;
 }
 
 function ContentApp() {
   const [popover, setPopover] = useState<PopoverData | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  // hotkey is loaded async; ref lets keydown handler always see latest value
   const hotkeyRef = useRef<string>('Alt');
   const hotkeyLoadedRef = useRef(false);
+  const contextRef = useRef<string | null>(null);
 
   useEffect(() => {
     getHotkey().then(k => {
       hotkeyRef.current = k;
       hotkeyLoadedRef.current = true;
     });
+  }, []);
+
+  useEffect(() => {
+    function onMessage(message: unknown) {
+      const msg = message as LltMessage;
+      if (msg.type !== 'llt.modelPack.changed') return;
+      setPopover(prev => {
+        if (!prev || prev.packIdForInstall !== msg.packId) return prev;
+        if (msg.status === 'ready') {
+          return {
+            ...prev,
+            state: {
+              kind: 'error',
+              message: 'Model pack installed. Hold the hotkey again to translate.',
+              code: 'model_pack_missing',
+            },
+          };
+        }
+        if (msg.status === 'failed') {
+          return {
+            ...prev,
+            state: {
+              kind: 'error',
+              message: msg.errorMessage ?? 'Model pack download failed',
+              code: 'model_pack_missing',
+            },
+          };
+        }
+        return prev;
+      });
+    }
+    chrome.runtime.onMessage.addListener(onMessage);
+    return () => chrome.runtime.onMessage.removeListener(onMessage);
   }, []);
 
   const showPopover = useCallback(async () => {
@@ -114,6 +148,7 @@ function ContentApp() {
     const target = extractTextTarget(selectionText, word, sentence);
     if (!target) return;
 
+    contextRef.current = target.context;
     let x = 100;
     let y = 100;
     if (sel && sel.rangeCount > 0) {
@@ -128,19 +163,68 @@ function ContentApp() {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    setPopover({ state: { kind: 'loading' }, position: { x, y } });
+    const pair = await getLanguagePair();
+    const pack = getModelPackForLanguagePair(pair);
+
+    setPopover({
+      state: { kind: 'loading' },
+      position: { x, y },
+      contextSentence: target.context,
+      packIdForInstall: pack?.id ?? null,
+    });
 
     try {
-      const pair = await getLanguagePair();
-      const data = await translate(
+      if (pack) {
+        const status = await requestModelPackStatus(pack.id);
+        if (status !== 'ready') {
+          setPopover(prev =>
+            prev
+              ? {
+                  ...prev,
+                  state: {
+                    kind: 'error',
+                    code: 'model_pack_missing',
+                    message:
+                      status === 'failed'
+                        ? 'Model pack download failed. Retry from Options or below.'
+                        : 'Install the translation model pack to translate offline.',
+                  },
+                }
+              : null,
+          );
+          return;
+        }
+      }
+
+      const data = await translateFacade.translate(
         { text: target.text, from_code: pair.from_code, to_code: pair.to_code },
         controller.signal,
       );
-      setPopover(prev => prev ? { ...prev, state: { kind: 'success', data } } : null);
+      setPopover(prev =>
+        prev
+          ? {
+              ...prev,
+              state: { kind: 'success', data },
+              contextSentence: contextRef.current,
+            }
+          : null,
+      );
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
-      const message = err instanceof TranslationApiError ? err.message : 'Translation failed';
-      setPopover(prev => prev ? { ...prev, state: { kind: 'error', message } } : null);
+      if (err instanceof TranslationFacadeError) {
+        setPopover(prev =>
+          prev
+            ? {
+                ...prev,
+                state: { kind: 'error', message: err.message, code: err.code },
+              }
+            : null,
+        );
+        return;
+      }
+      setPopover(prev =>
+        prev ? { ...prev, state: { kind: 'error', message: 'Translation failed' } } : null,
+      );
     }
   }, []);
 
@@ -150,9 +234,47 @@ function ContentApp() {
     setPopover(null);
   }, []);
 
+  const handleInstallModelPack = useCallback(async () => {
+    if (!popover?.packIdForInstall) return;
+    const pack = getModelPackForLanguagePair(await getLanguagePair());
+    const sizeLabel = pack ? formatApproxSize(pack.approxSizeBytes) : '';
+    const ok = window.confirm(
+      `Download the offline translation model pack${sizeLabel ? ` (${sizeLabel})` : ''}? Selection text stays on your device.`,
+    );
+    if (!ok) return;
+
+    setPopover(prev =>
+      prev
+        ? {
+            ...prev,
+            state: {
+              kind: 'error',
+              code: 'model_pack_missing',
+              message: 'Downloading model pack…',
+            },
+          }
+        : null,
+    );
+    try {
+      await requestModelPackInstall(popover.packIdForInstall);
+    } catch {
+      setPopover(prev =>
+        prev
+          ? {
+              ...prev,
+              state: {
+                kind: 'error',
+                code: 'model_pack_missing',
+                message: 'Could not start model pack download.',
+              },
+            }
+          : null,
+      );
+    }
+  }, [popover?.packIdForInstall]);
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      // Ignore key-repeat events to avoid re-triggering on hold
       if (e.repeat) return;
       if (!hotkeyLoadedRef.current) return;
       if (e.key === hotkeyRef.current) {
@@ -167,7 +289,6 @@ function ContentApp() {
     };
   }, [showPopover]);
 
-  // Stay open after hotkey release; dismiss only on outside click
   useEffect(() => {
     if (!popover) return;
 
@@ -188,6 +309,11 @@ function ContentApp() {
     <TranslationPopover
       state={popover.state}
       position={popover.position}
+      onInstallModelPack={
+        popover.state.kind === 'error' && popover.state.code === 'model_pack_missing'
+          ? handleInstallModelPack
+          : undefined
+      }
     />
   );
 }

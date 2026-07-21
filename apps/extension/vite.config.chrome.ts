@@ -25,7 +25,12 @@ export default mergeConfig(
     ],
     build: {
       ...baseBuildOptions,
-      outDir
+      outDir,
+      rollupOptions: {
+        input: {
+          offscreen: resolve(__dirname, 'src/pages/offscreen/index.html'),
+        },
+      },
     },
   })
 )
