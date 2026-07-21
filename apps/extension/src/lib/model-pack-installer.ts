@@ -1,6 +1,5 @@
-import { BERGAMOT_REGISTRY_URL } from './model-pack-registry';
+import { BERGAMOT_REGISTRY_URL, bergamotModelFileUrl } from './model-pack-registry';
 
-const MODEL_BASE_URL = 'https://storage.googleapis.com/bergamot-models-sandbox/0.3.3/';
 export const MODEL_CACHE_NAME = 'llt-bergamot-models-v1';
 
 type RegistryFile = {
@@ -50,7 +49,7 @@ export async function installModelPackFiles(
       Object.values(files).map(async file => {
         if (!file?.name) return;
 
-        const url = `${MODEL_BASE_URL}${file.name}`;
+        const url = bergamotModelFileUrl(key, file.name);
         const cached = await cache.match(url);
         if (cached) return;
 

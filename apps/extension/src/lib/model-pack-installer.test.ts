@@ -14,9 +14,7 @@ describe('installModelPackFiles', () => {
       open: vi.fn().mockResolvedValue({ match, put }),
     });
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo) => {
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
         const url = String(input);
         if (url.includes('registry.json')) {
           return new Response(
@@ -40,13 +38,17 @@ describe('installModelPackFiles', () => {
           );
         }
         return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-      }),
-    );
+      });
+    vi.stubGlobal('fetch', fetchMock);
 
     await installModelPackFiles('en', 'ru');
 
     expect(put).toHaveBeenCalled();
     expect(match).toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/enru/model.enru.bin'),
+      expect.any(Object),
+    );
   });
 
   it('throws when language pair is missing from registry', async () => {

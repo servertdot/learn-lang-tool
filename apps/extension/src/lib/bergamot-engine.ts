@@ -3,17 +3,18 @@ import {
   TranslatorBacking,
   CancelledError,
 } from '@browsermt/bergamot-translator/translator.js';
-import { BERGAMOT_REGISTRY_URL } from './model-pack-registry';
+import { BERGAMOT_REGISTRY_URL, bergamotModelFileUrl } from './model-pack-registry';
 
 import { MODEL_CACHE_NAME } from './model-pack-installer';
 
-const MODEL_BASE_URL = 'https://storage.googleapis.com/bergamot-models-sandbox/0.3.3/';
 const CACHE_NAME = MODEL_CACHE_NAME;
 
 /**
  * Bergamot backing for MV3: extension worker URLs + absolute model URLs + Cache API.
  */
 export class ExtensionBergamotBacking extends TranslatorBacking {
+  private currentPair: { from: string; to: string } | null = null;
+
   constructor(options: Record<string, unknown> = {}) {
     super({
       registryUrl: BERGAMOT_REGISTRY_URL,
@@ -21,6 +22,14 @@ export class ExtensionBergamotBacking extends TranslatorBacking {
       downloadTimeout: 120_000,
       ...options,
     });
+  }
+
+  getTranslationModel(
+    pair: { from: string; to: string },
+    options?: { signal?: AbortSignal },
+  ) {
+    this.currentPair = pair;
+    return super.getTranslationModel(pair, options);
   }
 
   async loadWorker() {
@@ -97,7 +106,17 @@ export class ExtensionBergamotBacking extends TranslatorBacking {
   }
 
   async fetch(url: string, checksum: string | undefined, extra?: { signal?: AbortSignal }) {
-    const absolute = url.startsWith('http') ? url : `${MODEL_BASE_URL}${url}`;
+    let absolute = url;
+    if (!url.startsWith('http')) {
+      if (!this.currentPair) {
+        throw new Error(`Cannot resolve model file URL without language pair: ${url}`);
+      }
+      absolute = bergamotModelFileUrl(
+        `${this.currentPair.from}${this.currentPair.to}`,
+        url,
+      );
+    }
+
     const cache = await caches.open(CACHE_NAME);
     const cached = await cache.match(absolute);
     if (cached) {

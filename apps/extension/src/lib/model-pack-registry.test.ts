@@ -3,6 +3,7 @@ import {
   getModelPackForLanguagePair,
   formatApproxSize,
   MODEL_PACK_REGISTRY,
+  bergamotModelFileUrl,
 } from './model-pack-registry';
 
 describe('model pack registry', () => {
@@ -27,5 +28,11 @@ describe('model pack registry', () => {
 
   it('formats approximate download size for consent UI', () => {
     expect(formatApproxSize(40 * 1024 * 1024)).toMatch(/MB/);
+  });
+
+  it('builds pair-scoped model file URLs', () => {
+    expect(bergamotModelFileUrl('enru', 'lex.50.50.enru.s2t.bin')).toBe(
+      'https://storage.googleapis.com/bergamot-models-sandbox/0.3.3/enru/lex.50.50.enru.s2t.bin',
+    );
   });
 });

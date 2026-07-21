@@ -29,6 +29,15 @@ export const MODEL_PACK_REGISTRY: readonly ModelPackDescriptor[] = [
 export const BERGAMOT_REGISTRY_URL =
   'https://storage.googleapis.com/bergamot-models-sandbox/0.3.3/registry.json';
 
+/** Base URL for individual model files (files live under `{base}{pair}/{name}`). */
+export const BERGAMOT_MODEL_BASE_URL =
+  'https://storage.googleapis.com/bergamot-models-sandbox/0.3.3/';
+
+/** Resolve a registry file name to its download URL for a language pair key like `enru`. */
+export function bergamotModelFileUrl(pairKey: string, fileName: string): string {
+  return `${BERGAMOT_MODEL_BASE_URL}${pairKey}/${fileName}`;
+}
+
 export function getModelPackForLanguagePair(pair: LanguagePair): ModelPackDescriptor | null {
   return (
     MODEL_PACK_REGISTRY.find(
