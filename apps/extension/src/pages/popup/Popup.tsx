@@ -68,13 +68,13 @@ export default function Popup() {
     setAnkiError(null);
 
     try {
-      const noteId = await requestAddToAnki({
+      const addResult = await requestAddToAnki({
         textFrom: result.source_text,
         textTo: result.translated_text,
         sentence: result.source_text,
       });
-      setAnkiNoteId(noteId);
-      setAnkiState('added');
+      setAnkiNoteId(addResult.status === 'synced' ? addResult.noteId : null);
+      setAnkiState(addResult.status === 'synced' ? 'added' : 'queued');
       setAnkiViewState('idle');
     } catch (error) {
       setAnkiState('error');

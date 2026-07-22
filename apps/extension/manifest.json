@@ -16,6 +16,7 @@
   },
   "permissions": [
     "activeTab",
+    "alarms",
     "clipboardRead",
     "clipboardWrite",
     "contextMenus",

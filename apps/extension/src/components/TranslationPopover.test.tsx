@@ -32,4 +32,27 @@ describe('TranslationPopover', () => {
     expect(html).not.toContain('source-code');
     expect(html).not.toContain('target-code');
   });
+
+  it('explains that a card is safely queued while Anki is closed', () => {
+    const html = renderToStaticMarkup(
+      <TranslationPopover
+        state={{
+          kind: 'success',
+          data: {
+            source_text: 'hello',
+            translated_text: 'привет',
+            from_code: 'en',
+            to_code: 'ru',
+            can_add_to_anki: true,
+          },
+        }}
+        position={{ x: 0, y: 0 }}
+        ankiState="queued"
+        onAddToAnki={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Saved for later Anki sync"');
+    expect(html).toContain('Saved locally. It will sync when Anki is open.');
+  });
 });

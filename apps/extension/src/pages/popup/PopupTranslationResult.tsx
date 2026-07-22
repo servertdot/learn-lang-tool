@@ -46,6 +46,12 @@ export function PopupTranslationResult({
         </p>
       )}
 
+      {ankiState === 'queued' && (
+        <p className="mt-2 text-xs leading-relaxed text-amber-700" role="status">
+          Saved locally. It will sync when Anki is open.
+        </p>
+      )}
+
       <div className="my-3 border-t border-slate-200" />
       <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
         Original

@@ -67,7 +67,7 @@ function ContentApp() {
   const hotkeyRef = useRef<string>('Alt');
   const hotkeyLoadedRef = useRef(false);
   const contextRef = useRef<string | null>(null);
-  const pointerRef = useRef({ x: 100, y: 100 });
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     getHotkey().then(k => {
@@ -121,6 +121,7 @@ function ContentApp() {
       window,
       document,
       pageUrl,
+      pointer: pointerRef.current ?? undefined,
       clipboard: navigator.clipboard
         ? {
             readText: () => navigator.clipboard.readText(),
@@ -148,8 +149,8 @@ function ContentApp() {
 
     contextRef.current = target.context;
     const sourceRect = range?.getClientRects()[0] ?? source.rect;
-    const x = sourceRect?.left ?? pointerRef.current.x;
-    const y = sourceRect ? sourceRect.bottom + 8 : pointerRef.current.y + 8;
+    const x = sourceRect?.left ?? pointerRef.current?.x ?? 100;
+    const y = sourceRect ? sourceRect.bottom + 8 : (pointerRef.current?.y ?? 100) + 8;
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -280,7 +281,7 @@ function ContentApp() {
     );
 
     try {
-      const noteId = await requestAddToAnki({
+      const addResult = await requestAddToAnki({
         textFrom: data.source_text,
         textTo: data.translated_text,
         sentence: popover.contextSentence ?? data.source_text,
@@ -289,10 +290,10 @@ function ContentApp() {
         prev?.state.kind === 'success' && prev.state.data === data
           ? {
               ...prev,
-              ankiState: 'added',
+              ankiState: addResult.status === 'synced' ? 'added' : 'queued',
               ankiViewState: 'idle',
               ankiError: null,
-              ankiNoteId: noteId,
+              ankiNoteId: addResult.status === 'synced' ? addResult.noteId : null,
             }
           : null,
       );

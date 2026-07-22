@@ -23,6 +23,58 @@ describe('readPageTextSource', () => {
     expect(source?.range).toBe(range);
   });
 
+  it('reads the word under the pointer when there is no selection', async () => {
+    document.body.innerHTML = '<p id="line" style="user-select: none">Hover over this word</p>';
+    const line = document.getElementById('line')!;
+    const text = line.firstChild as Text;
+    const caret = document.createRange();
+    caret.setStart(text, 17);
+    caret.collapse(true);
+
+    vi.spyOn(document, 'elementFromPoint').mockReturnValue(line);
+    Object.defineProperty(document, 'caretRangeFromPoint', {
+      configurable: true,
+      value: vi.fn(() => caret),
+    });
+
+    const source = await readPageTextSource({
+      window,
+      document,
+      pointer: { x: 120, y: 40 },
+    });
+
+    expect(source?.text).toBe('word');
+    expect(source?.kind).toBe('hovered-word');
+    expect(source?.range?.toString()).toBe('word');
+  });
+
+  it('keeps an explicit selection ahead of the hovered word', async () => {
+    document.body.innerHTML = '<p id="line">selected hover</p>';
+    const line = document.getElementById('line')!;
+    const text = line.firstChild as Text;
+    const selectionRange = document.createRange();
+    selectionRange.setStart(text, 0);
+    selectionRange.setEnd(text, 8);
+    window.getSelection()?.addRange(selectionRange);
+
+    const caretAtHover = document.createRange();
+    caretAtHover.setStart(text, 10);
+    caretAtHover.collapse(true);
+    Object.defineProperty(document, 'caretRangeFromPoint', {
+      configurable: true,
+      value: vi.fn(() => caretAtHover),
+    });
+
+    const source = await readPageTextSource({
+      window,
+      document,
+      pointer: { x: 120, y: 40 },
+    });
+
+    expect(source?.text).toBe('selected');
+    expect(source?.kind).toBe('selection');
+  });
+
   it('reads the current YouTube caption when it cannot be selected', async () => {
     document.body.innerHTML = `
       <div class="ytp-caption-window-container">

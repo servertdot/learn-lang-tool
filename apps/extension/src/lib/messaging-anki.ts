@@ -1,8 +1,14 @@
 import type { AnkiCardContent } from './anki';
+import type { AnkiExportFormat } from './anki-export';
+import type { AnkiQueueInfo } from './anki-queue';
 import type {
   AnkiAddNoteResponse,
   AnkiCollectionInfoResponse,
   AnkiModelFieldNamesResponse,
+  AnkiQueueClearResponse,
+  AnkiQueueExportResponse,
+  AnkiQueueInfoResponse,
+  AnkiQueueSyncResponse,
   AnkiViewNoteResponse,
   LltMessage,
 } from './extension-messages';
@@ -26,7 +32,11 @@ export async function requestAnkiModelFieldNames(modelName: string): Promise<str
   return response.fieldNames;
 }
 
-export async function requestAddToAnki(content: AnkiCardContent): Promise<number> {
+export type AnkiAddResult =
+  | { status: 'synced'; noteId: number; queuedCount: number }
+  | { status: 'queued'; queuedCount: number };
+
+export async function requestAddToAnki(content: AnkiCardContent): Promise<AnkiAddResult> {
   const message: LltMessage = {
     type: 'llt.anki.addNote',
     content,
@@ -35,7 +45,9 @@ export async function requestAddToAnki(content: AnkiCardContent): Promise<number
   if (!response.ok) {
     throw new Error(response.error);
   }
-  return response.noteId;
+  return response.status === 'synced'
+    ? { status: 'synced', noteId: response.noteId, queuedCount: response.queuedCount }
+    : { status: 'queued', queuedCount: response.queuedCount };
 }
 
 export async function requestViewInAnki(noteId: number): Promise<void> {
@@ -47,4 +59,46 @@ export async function requestViewInAnki(noteId: number): Promise<void> {
   if (!response.ok) {
     throw new Error(response.error);
   }
+}
+
+export async function requestAnkiQueueInfo(): Promise<AnkiQueueInfo> {
+  const message: LltMessage = { type: 'llt.anki.queue.getInfo' };
+  const response = (await chrome.runtime.sendMessage(message)) as AnkiQueueInfoResponse;
+  if (!response.ok) throw new Error(response.error);
+  return {
+    count: response.count,
+    failedCount: response.failedCount,
+    lastError: response.lastError,
+  };
+}
+
+export async function requestAnkiQueueSync(): Promise<
+  AnkiQueueInfo & { syncedCount: number }
+> {
+  const message: LltMessage = { type: 'llt.anki.queue.sync' };
+  const response = (await chrome.runtime.sendMessage(message)) as AnkiQueueSyncResponse;
+  if (!response.ok) throw new Error(response.error);
+  return {
+    syncedCount: response.syncedCount,
+    count: response.count,
+    failedCount: response.failedCount,
+    lastError: response.lastError,
+  };
+}
+
+export async function requestAnkiQueueExport(format: AnkiExportFormat) {
+  const message: LltMessage = { type: 'llt.anki.queue.export', format };
+  const response = (await chrome.runtime.sendMessage(message)) as AnkiQueueExportResponse;
+  if (!response.ok) throw new Error(response.error);
+  return {
+    content: response.content,
+    filename: response.filename,
+    mimeType: response.mimeType,
+  };
+}
+
+export async function requestAnkiQueueClear(): Promise<void> {
+  const message: LltMessage = { type: 'llt.anki.queue.clear' };
+  const response = (await chrome.runtime.sendMessage(message)) as AnkiQueueClearResponse;
+  if (!response.ok) throw new Error(response.error);
 }

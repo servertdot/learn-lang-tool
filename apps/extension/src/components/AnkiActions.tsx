@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type AnkiAddState = 'idle' | 'adding' | 'added' | 'error';
+export type AnkiAddState = 'idle' | 'adding' | 'queued' | 'added' | 'error';
 export type AnkiViewState = 'idle' | 'opening' | 'error';
 
 interface AnkiActionsProps {
@@ -38,18 +38,30 @@ export function AnkiActions({ addState, viewState, onAdd, onView }: AnkiActionsP
       <button
         type="button"
         onClick={onAdd}
-        disabled={addState === 'adding' || addState === 'added'}
-        title={addState === 'added' ? 'Added to Anki' : 'Add to Anki'}
+        disabled={addState === 'adding' || addState === 'queued' || addState === 'added'}
+        title={
+          addState === 'added'
+            ? 'Added to Anki'
+            : addState === 'queued'
+              ? 'Saved for Anki sync'
+              : 'Add to Anki'
+        }
         aria-label={
           addState === 'adding'
             ? 'Adding to Anki'
             : addState === 'added'
               ? 'Added to Anki'
+              : addState === 'queued'
+                ? 'Saved for later Anki sync'
               : addState === 'error'
                 ? 'Try adding to Anki again'
                 : 'Add to Anki'
         }
-        className="grid size-5 place-items-center rounded bg-emerald-50 text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-default disabled:opacity-70"
+        className={`grid size-5 place-items-center rounded transition-colors disabled:cursor-default disabled:opacity-70 ${
+          addState === 'queued'
+            ? 'bg-amber-50 text-amber-700'
+            : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+        }`}
       >
         <svg
           className={`size-2.5 ${addState === 'adding' ? 'animate-pulse' : ''}`}

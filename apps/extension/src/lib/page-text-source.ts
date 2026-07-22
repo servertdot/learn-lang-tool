@@ -1,6 +1,9 @@
+import { getWordRangeAtRange } from './word-at-caret';
+
 export type PageTextSourceKind =
   | 'selection'
   | 'editable-selection'
+  | 'hovered-word'
   | 'youtube-caption'
   | 'clipboard-selection';
 
@@ -20,6 +23,7 @@ interface ReadPageTextSourceOptions {
   window: Window;
   document: Document;
   pageUrl?: URL;
+  pointer?: { x: number; y: number };
   clipboard?: ClipboardPort;
   copySelection?: () => boolean;
 }
@@ -30,6 +34,78 @@ function normalizeText(text: string): string {
 
 function rectForElement(element: Element | null): DOMRect | null {
   return element?.getBoundingClientRect() ?? null;
+}
+
+function caretRangeAtPoint(document: Document, x: number, y: number): Range | null {
+  const position = document.caretPositionFromPoint?.(x, y);
+  if (position) {
+    const range = document.createRange();
+    try {
+      range.setStart(position.offsetNode, position.offset);
+      range.collapse(true);
+      return range;
+    } catch {
+      return null;
+    }
+  }
+
+  const legacyDocument = document as unknown as {
+    caretRangeFromPoint?: (pointX: number, pointY: number) => Range | null;
+  };
+  return legacyDocument.caretRangeFromPoint?.(x, y) ?? null;
+}
+
+function rectContainsPoint(rect: DOMRect, x: number, y: number): boolean {
+  const tolerance = 1;
+  return (
+    x >= rect.left - tolerance &&
+    x <= rect.right + tolerance &&
+    y >= rect.top - tolerance &&
+    y <= rect.bottom + tolerance
+  );
+}
+
+export function readHoveredWord(
+  document: Document,
+  pointer: { x: number; y: number },
+): PageTextSource | null {
+  const hitElement = document.elementFromPoint(pointer.x, pointer.y);
+  if (hitElement?.closest('#__llt-root')) return null;
+
+  const caretRange = caretRangeAtPoint(document, pointer.x, pointer.y);
+  if (!caretRange) return null;
+
+  const caretNode = caretRange.startContainer;
+  const caretElement =
+    caretNode.nodeType === Node.ELEMENT_NODE
+      ? (caretNode as Element)
+      : caretNode.parentElement;
+  if (
+    hitElement &&
+    caretElement &&
+    !hitElement.contains(caretElement) &&
+    !caretElement.contains(hitElement)
+  ) {
+    return null;
+  }
+
+  const { word, range } = getWordRangeAtRange(caretRange);
+  if (!word || !range) return null;
+
+  const clientRects = Array.from(range.getClientRects());
+  if (
+    clientRects.length > 0 &&
+    !clientRects.some(rect => rectContainsPoint(rect, pointer.x, pointer.y))
+  ) {
+    return null;
+  }
+
+  return {
+    text: word,
+    kind: 'hovered-word',
+    range,
+    rect: clientRects[0] ?? null,
+  };
 }
 
 function readEditableSelection(document: Document): PageTextSource | null {
@@ -132,6 +208,11 @@ export async function readPageTextSource(
 
   const editableSelection = readEditableSelection(options.document);
   if (editableSelection) return editableSelection;
+
+  if (options.pointer) {
+    const hoveredWord = readHoveredWord(options.document, options.pointer);
+    if (hoveredWord) return hoveredWord;
+  }
 
   const pageUrl = options.pageUrl ?? new URL(options.window.location.href);
   const youtubeCaption = readYouTubeCaption(options.document, pageUrl);

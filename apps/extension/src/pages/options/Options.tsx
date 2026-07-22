@@ -18,7 +18,12 @@ import {
 import {
   requestAnkiCollectionInfo,
   requestAnkiModelFieldNames,
+  requestAnkiQueueClear,
+  requestAnkiQueueExport,
+  requestAnkiQueueInfo,
+  requestAnkiQueueSync,
 } from '@src/lib/messaging-anki';
+import type { AnkiQueueInfo } from '@src/lib/anki-queue';
 import type { LanguagePair, TranslationProvider } from '@package/shared';
 import {
   DEFAULT_LANGUAGE_PAIR,
@@ -61,6 +66,12 @@ export default function Options() {
   const [ankiStatus, setAnkiStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [ankiError, setAnkiError] = useState<string | undefined>();
   const [ankiSaved, setAnkiSaved] = useState(false);
+  const [ankiQueueInfo, setAnkiQueueInfo] = useState<AnkiQueueInfo>({
+    count: 0,
+    failedCount: 0,
+  });
+  const [ankiQueueBusy, setAnkiQueueBusy] = useState(false);
+  const [ankiQueueNotice, setAnkiQueueNotice] = useState<string>();
   const ankiRequestVersion = useRef(0);
 
   const pack = getModelPackForLanguagePair(pair);
@@ -76,6 +87,10 @@ export default function Options() {
       setHotkeyState(k);
       setProvider(value);
     });
+  }, []);
+
+  useEffect(() => {
+    void refreshQueueInfo();
   }, []);
 
   useEffect(() => {
@@ -187,7 +202,11 @@ export default function Options() {
       } else {
         setModelFieldNames([]);
       }
-      if (requestVersion === ankiRequestVersion.current) setAnkiStatus('ready');
+      if (requestVersion === ankiRequestVersion.current) {
+        setAnkiStatus('ready');
+        const queueResult = await requestAnkiQueueSync();
+        setAnkiQueueInfo(queueResult);
+      }
     } catch (error) {
       if (requestVersion !== ankiRequestVersion.current) return;
       setAnkiStatus('error');
@@ -227,6 +246,76 @@ export default function Options() {
     setAnkiError(undefined);
     setAnkiSaved(true);
     setTimeout(() => setAnkiSaved(false), 2000);
+  }
+
+  async function refreshQueueInfo() {
+    try {
+      setAnkiQueueInfo(await requestAnkiQueueInfo());
+    } catch (error) {
+      setAnkiQueueNotice(
+        error instanceof Error ? error.message : 'Could not read the local Anki queue.',
+      );
+    }
+  }
+
+  async function handleQueueSync() {
+    setAnkiQueueBusy(true);
+    setAnkiQueueNotice(undefined);
+    try {
+      const result = await requestAnkiQueueSync();
+      setAnkiQueueInfo(result);
+      setAnkiQueueNotice(
+        result.count === 0
+          ? `Synced ${result.syncedCount} card${result.syncedCount === 1 ? '' : 's'} to Anki.`
+          : 'Anki is still unavailable. Your cards remain saved locally.',
+      );
+    } catch (error) {
+      setAnkiQueueNotice(error instanceof Error ? error.message : 'Could not sync the Anki queue.');
+    } finally {
+      setAnkiQueueBusy(false);
+    }
+  }
+
+  async function handleQueueExport(format: 'tsv' | 'csv') {
+    setAnkiQueueBusy(true);
+    setAnkiQueueNotice(undefined);
+    try {
+      const exported = await requestAnkiQueueExport(format);
+      const url = URL.createObjectURL(new Blob([exported.content], { type: exported.mimeType }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = exported.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setAnkiQueueNotice(
+        `${format.toUpperCase()} downloaded. The cards remain queued until you clear or sync them.`,
+      );
+    } catch (error) {
+      setAnkiQueueNotice(error instanceof Error ? error.message : 'Could not export the queue.');
+    } finally {
+      setAnkiQueueBusy(false);
+    }
+  }
+
+  async function handleQueueClear() {
+    const confirmed = window.confirm(
+      `Remove ${ankiQueueInfo.count} waiting card${ankiQueueInfo.count === 1 ? '' : 's'} from this browser? Only do this after importing an export into Anki.`,
+    );
+    if (!confirmed) return;
+
+    setAnkiQueueBusy(true);
+    setAnkiQueueNotice(undefined);
+    try {
+      await requestAnkiQueueClear();
+      setAnkiQueueInfo({ count: 0, failedCount: 0 });
+      setAnkiQueueNotice('Local Anki queue cleared.');
+    } catch (error) {
+      setAnkiQueueNotice(error instanceof Error ? error.message : 'Could not clear the queue.');
+    } finally {
+      setAnkiQueueBusy(false);
+    }
   }
 
   return (
@@ -383,6 +472,71 @@ export default function Options() {
             {ankiStatus === 'error' && ankiError && (
               <p className="text-xs leading-relaxed text-rose-600" role="alert">
                 {ankiError}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Offline queue</h3>
+                <p className="mt-1 text-xs leading-relaxed text-gray-600">
+                  Add cards while Anki is closed. They stay in this browser and sync automatically
+                  when Anki becomes available.
+                </p>
+              </div>
+              <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                {ankiQueueInfo.count} waiting
+              </span>
+            </div>
+
+            {ankiQueueInfo.lastError && ankiQueueInfo.count > 0 && (
+              <p className="mt-3 text-xs leading-relaxed text-amber-800">
+                Last sync attempt: {ankiQueueInfo.lastError}
+              </p>
+            )}
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => void handleQueueSync()}
+                disabled={ankiQueueBusy || ankiQueueInfo.count === 0}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {ankiQueueBusy ? 'Working…' : 'Sync now'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleQueueExport('tsv')}
+                disabled={ankiQueueBusy || ankiQueueInfo.count === 0}
+                className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Export TSV
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleQueueExport('csv')}
+                disabled={ankiQueueBusy || ankiQueueInfo.count === 0}
+                className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Export CSV
+              </button>
+            </div>
+
+            {ankiQueueInfo.count > 0 && (
+              <button
+                type="button"
+                onClick={() => void handleQueueClear()}
+                disabled={ankiQueueBusy}
+                className="mt-3 text-xs font-medium text-rose-700 underline decoration-rose-300 underline-offset-2 disabled:opacity-40"
+              >
+                Clear queue after manual import
+              </button>
+            )}
+
+            {ankiQueueNotice && (
+              <p className="mt-3 text-xs leading-relaxed text-gray-700" role="status">
+                {ankiQueueNotice}
               </p>
             )}
           </div>

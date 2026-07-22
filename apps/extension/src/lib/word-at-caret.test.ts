@@ -2,7 +2,12 @@
  * @vitest-environment happy-dom
  */
 import { describe, it, expect } from 'vitest';
-import { extractSentenceAround, resolveTextCaret, getWordAtRange } from './word-at-caret';
+import {
+  extractSentenceAround,
+  resolveTextCaret,
+  getWordAtRange,
+  getWordRangeAtRange,
+} from './word-at-caret';
 
 describe('extractSentenceAround', () => {
   it('returns the sentence containing the offset', () => {
@@ -56,5 +61,18 @@ describe('getWordAtRange', () => {
     const { word, sentence } = getWordAtRange(range);
     expect(word).toBe('two');
     expect(sentence).toContain('two');
+  });
+
+  it('expands the caret to a range containing only that word', () => {
+    document.body.innerHTML = '<p id="p">one two three</p>';
+    const textNode = document.getElementById('p')!.firstChild as Text;
+    const caret = document.createRange();
+    caret.setStart(textNode, 5);
+    caret.collapse(true);
+
+    const result = getWordRangeAtRange(caret);
+
+    expect(result.word).toBe('two');
+    expect(result.range?.toString()).toBe('two');
   });
 });

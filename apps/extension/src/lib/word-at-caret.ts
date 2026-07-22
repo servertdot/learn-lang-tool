@@ -35,7 +35,13 @@ export function resolveTextCaret(range: Range): { node: Text; offset: number } |
   return { node: textNode, offset };
 }
 
-function wordFromSegmenter(text: string, offset: number): string | null {
+interface WordSpan {
+  word: string;
+  start: number;
+  end: number;
+}
+
+function wordFromSegmenter(text: string, offset: number): WordSpan | null | undefined {
   const SegmenterCtor = (Intl as typeof Intl & {
     Segmenter?: new (
       locales?: string | string[],
@@ -43,31 +49,35 @@ function wordFromSegmenter(text: string, offset: number): string | null {
     ) => { segment: (input: string) => Iterable<{ segment: string; index: number; isWordLike?: boolean }> };
   }).Segmenter;
 
-  if (!SegmenterCtor) return null;
+  if (!SegmenterCtor) return undefined;
 
   const segmenter = new SegmenterCtor(undefined, { granularity: 'word' });
+  const candidateOffsets = [offset, offset - 1].filter(
+    candidate => candidate >= 0 && candidate < text.length,
+  );
   for (const part of segmenter.segment(text)) {
     const start = part.index;
     const end = start + part.segment.length;
-    if (offset >= start && offset <= end) {
+    if (candidateOffsets.some(candidate => candidate >= start && candidate < end)) {
       if (part.isWordLike === false) {
         continue;
       }
       const word = part.segment.trim();
-      return word || null;
+      return word ? { word, start, end } : null;
     }
   }
   return null;
 }
 
-function wordFromWhitespace(text: string, offset: number): string | null {
+function wordFromWhitespace(text: string, offset: number): WordSpan | null {
   if (!text) return null;
-  let start = offset;
-  let end = offset;
+  const caretOffset = Math.max(0, Math.min(offset, text.length));
+  let start = caretOffset;
+  let end = caretOffset;
   while (start > 0 && !/\s/.test(text[start - 1]!)) start--;
   while (end < text.length && !/\s/.test(text[end]!)) end++;
   const word = text.slice(start, end).trim();
-  return word || null;
+  return word ? { word, start, end } : null;
 }
 
 /** Max chars for a sentence window used as Anki context (not for translation). */
@@ -104,16 +114,34 @@ export function extractSentenceAround(text: string, wordOffset: number): string 
   return trimmed;
 }
 
-export function getWordAtRange(range: Range): { word: string | null; sentence: string | null } {
+export function getWordRangeAtRange(range: Range): {
+  word: string | null;
+  sentence: string | null;
+  range: Range | null;
+} {
   const caret = resolveTextCaret(range);
-  if (!caret) return { word: null, sentence: null };
+  if (!caret) return { word: null, sentence: null, range: null };
 
   const text = caret.node.textContent ?? '';
-  const word =
-    wordFromSegmenter(text, caret.offset) ?? wordFromWhitespace(text, caret.offset);
+  const segmentedWord = wordFromSegmenter(text, caret.offset);
+  const wordSpan =
+    segmentedWord === undefined
+      ? wordFromWhitespace(text, caret.offset)
+      : segmentedWord;
 
   // Prefer sentence within the same text node (avoids grabbing whole article via parent).
   const sentence = extractSentenceAround(text, caret.offset);
 
-  return { word, sentence };
+  if (!wordSpan) return { word: null, sentence, range: null };
+
+  const wordRange = caret.node.ownerDocument.createRange();
+  wordRange.setStart(caret.node, wordSpan.start);
+  wordRange.setEnd(caret.node, wordSpan.end);
+
+  return { word: wordSpan.word, sentence, range: wordRange };
+}
+
+export function getWordAtRange(range: Range): { word: string | null; sentence: string | null } {
+  const result = getWordRangeAtRange(range);
+  return { word: result.word, sentence: result.sentence };
 }

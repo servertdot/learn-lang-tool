@@ -3,8 +3,10 @@ import { DEFAULT_ANKI_SETTINGS, createAnkiNote } from './anki';
 import {
   addNoteWithAnkiConnect,
   browseNoteWithAnkiConnect,
+  findQueuedNoteIdsWithAnkiConnect,
   getCollectionInfoWithAnkiConnect,
   getModelFieldNamesWithAnkiConnect,
+  removeAnkiQueueTagWithAnkiConnect,
 } from './anki-connect';
 
 function jsonResponse(result: unknown, error: string | null = null): Response {
@@ -79,6 +81,39 @@ describe('AnkiConnect client', () => {
     ).rejects.toMatchObject({
       code: 'api_error',
       message: 'deck was not found: English',
+    });
+  });
+
+  it('finds an already-synced queued note by its private tag', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ permission: 'granted' }))
+      .mockResolvedValueOnce(jsonResponse([123]));
+
+    await expect(
+      findQueuedNoteIdsWithAnkiConnect(DEFAULT_ANKI_SETTINGS, 'queue-id', {
+        fetch: fetchMock,
+      }),
+    ).resolves.toEqual([123]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toMatchObject({
+      action: 'findNotes',
+      params: { query: 'tag:llt_queue_queueid' },
+    });
+  });
+
+  it('removes the private queue tag after a successful sync', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ permission: 'granted' }))
+      .mockResolvedValueOnce(jsonResponse(null));
+
+    await removeAnkiQueueTagWithAnkiConnect(DEFAULT_ANKI_SETTINGS, 123, 'queue-id', {
+      fetch: fetchMock,
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toMatchObject({
+      action: 'removeTags',
+      params: { notes: [123], tags: 'llt_queue_queueid' },
     });
   });
 

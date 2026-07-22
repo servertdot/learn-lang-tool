@@ -155,6 +155,12 @@ export function TranslationPopover({
             </p>
           )}
 
+          {ankiState === 'queued' && (
+            <p className="mb-3 text-xs leading-relaxed text-amber-700" role="status">
+              Saved locally. It will sync when Anki is open.
+            </p>
+          )}
+
           <p
             className="mt-1 text-[15px] font-medium leading-relaxed text-slate-900"
             aria-live="polite"

@@ -2,6 +2,10 @@ import type {
   AnkiAddNoteResponse,
   AnkiCollectionInfoResponse,
   AnkiModelFieldNamesResponse,
+  AnkiQueueClearResponse,
+  AnkiQueueExportResponse,
+  AnkiQueueInfoResponse,
+  AnkiQueueSyncResponse,
   AnkiViewNoteResponse,
   LltMessage,
   OffscreenResponse,
@@ -21,10 +25,15 @@ import { MAX_TRANSLATION_TEXT_LENGTH } from '@package/shared';
 import {
   addNoteWithAnkiConnect,
   browseNoteWithAnkiConnect,
+  findQueuedNoteIdsWithAnkiConnect,
   getCollectionInfoWithAnkiConnect,
   getModelFieldNamesWithAnkiConnect,
+  removeAnkiQueueTagWithAnkiConnect,
 } from '@src/lib/anki-connect';
 import { createAnkiNote } from '@src/lib/anki';
+import { exportAnkiQueue } from '@src/lib/anki-export';
+import { AnkiQueue, createChromeAnkiQueueStorage } from '@src/lib/anki-queue';
+import { syncAnkiQueue } from '@src/lib/anki-queue-sync';
 import {
   handleContextSelection,
   openSelectionResult,
@@ -42,6 +51,42 @@ const googleTranslationFacade = createTranslationFacade(createGoogleTranslationE
   maxLength: MAX_TRANSLATION_TEXT_LENGTH,
 });
 const remoteTranslateAborts = new Map<string, AbortController>();
+const ANKI_QUEUE_SYNC_ALARM = 'llt.anki.syncQueue';
+const ankiQueue = new AnkiQueue(createChromeAnkiQueueStorage());
+let ankiQueueSyncPromise: ReturnType<typeof runAnkiQueueSync> | null = null;
+
+async function runAnkiQueueSync() {
+  const settings = await getAnkiSettings();
+  return syncAnkiQueue(ankiQueue, settings, {
+    findNoteIds: findQueuedNoteIdsWithAnkiConnect,
+    addNote: addNoteWithAnkiConnect,
+    removeQueueTag: removeAnkiQueueTagWithAnkiConnect,
+  });
+}
+
+async function syncQueuedAnkiCards() {
+  if (!ankiQueueSyncPromise) {
+    ankiQueueSyncPromise = runAnkiQueueSync().finally(() => {
+      ankiQueueSyncPromise = null;
+    });
+  }
+  return ankiQueueSyncPromise;
+}
+
+async function updateAnkiQueueSyncAlarm(): Promise<void> {
+  const { count } = await ankiQueue.getInfo();
+  if (count === 0) {
+    await chrome.alarms.clear(ANKI_QUEUE_SYNC_ALARM);
+    return;
+  }
+  const alarm = await chrome.alarms.get(ANKI_QUEUE_SYNC_ALARM);
+  if (!alarm) {
+    chrome.alarms.create(ANKI_QUEUE_SYNC_ALARM, {
+      delayInMinutes: 1,
+      periodInMinutes: 1,
+    });
+  }
+}
 
 function registerTranslateSelectionMenu(): void {
   chrome.contextMenus.create(
@@ -62,6 +107,17 @@ function registerTranslateSelectionMenu(): void {
 registerTranslateSelectionMenu();
 chrome.runtime.onInstalled.addListener(registerTranslateSelectionMenu);
 chrome.runtime.onStartup.addListener(registerTranslateSelectionMenu);
+
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name !== ANKI_QUEUE_SYNC_ALARM) return;
+  void syncQueuedAnkiCards()
+    .then(updateAnkiQueueSyncAlarm)
+    .catch(error => lltError('bg', 'Anki queue sync failed', error));
+});
+
+void updateAnkiQueueSyncAlarm().catch(error => {
+  lltError('bg', 'Could not schedule Anki queue sync', error);
+});
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   void handleContextSelection(info, tab ?? {}, {
@@ -246,12 +302,81 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
         try {
           const settings = await getAnkiSettings();
           const note = createAnkiNote(settings, message.content);
-          const noteId = await addNoteWithAnkiConnect(settings, note);
-          sendResponse({ ok: true, noteId } satisfies AnkiAddNoteResponse);
+          const item = await ankiQueue.enqueue(note);
+          await updateAnkiQueueSyncAlarm();
+          const syncResult = await syncQueuedAnkiCards();
+          const info = await ankiQueue.getInfo();
+          await updateAnkiQueueSyncAlarm();
+          const noteId = syncResult.noteIds[item.id];
+          if (noteId !== undefined) {
+            sendResponse({
+              ok: true,
+              status: 'synced',
+              noteId,
+              queuedCount: info.count,
+            } satisfies AnkiAddNoteResponse);
+          } else {
+            sendResponse({
+              ok: true,
+              status: 'queued',
+              queuedCount: info.count,
+            } satisfies AnkiAddNoteResponse);
+          }
         } catch (err) {
-          const error = err instanceof Error ? err.message : 'Could not add the card to Anki.';
-          lltError('bg', 'Anki add note failed', error);
+          const error = err instanceof Error ? err.message : 'Could not save the card.';
+          lltError('bg', 'Anki queue save failed', error);
           sendResponse({ ok: false, error } satisfies AnkiAddNoteResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.anki.queue.getInfo') {
+        try {
+          const info = await ankiQueue.getInfo();
+          sendResponse({ ok: true, ...info } satisfies AnkiQueueInfoResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not read the Anki queue.';
+          sendResponse({ ok: false, error } satisfies AnkiQueueInfoResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.anki.queue.sync') {
+        try {
+          const result = await syncQueuedAnkiCards();
+          const info = await ankiQueue.getInfo();
+          await updateAnkiQueueSyncAlarm();
+          sendResponse({
+            ok: true,
+            syncedCount: result.syncedCount,
+            ...info,
+          } satisfies AnkiQueueSyncResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not sync the Anki queue.';
+          sendResponse({ ok: false, error } satisfies AnkiQueueSyncResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.anki.queue.export') {
+        try {
+          const exported = exportAnkiQueue(await ankiQueue.list(), message.format);
+          sendResponse({ ok: true, ...exported } satisfies AnkiQueueExportResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not export the Anki queue.';
+          sendResponse({ ok: false, error } satisfies AnkiQueueExportResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.anki.queue.clear') {
+        try {
+          await ankiQueue.clear();
+          await updateAnkiQueueSyncAlarm();
+          sendResponse({ ok: true } satisfies AnkiQueueClearResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not clear the Anki queue.';
+          sendResponse({ ok: false, error } satisfies AnkiQueueClearResponse);
         }
         return;
       }

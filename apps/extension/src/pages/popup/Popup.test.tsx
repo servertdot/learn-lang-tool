@@ -42,4 +42,19 @@ describe('PopupTranslationResult', () => {
     expect(html).toContain('aria-label="Added to Anki"');
     expect(html).toContain('aria-label="View added note in Anki"');
   });
+
+  it('shows that the card is queued when Anki is closed', () => {
+    const html = renderToStaticMarkup(
+      <PopupTranslationResult
+        result={result}
+        ankiState="queued"
+        ankiViewState="idle"
+        ankiError={null}
+        onAddToAnki={vi.fn()}
+        onViewInAnki={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('Saved locally. It will sync when Anki is open.');
+  });
 });

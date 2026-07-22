@@ -1,4 +1,5 @@
 import type { AnkiNote, AnkiSettings } from './anki';
+import { getAnkiQueueTag } from './anki-queue';
 
 const ANKI_CONNECT_API_VERSION = 6;
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -200,6 +201,45 @@ export async function addNoteWithAnkiConnect(
     );
   }
   return noteId;
+}
+
+export async function findQueuedNoteIdsWithAnkiConnect(
+  settings: AnkiSettings,
+  queueItemId: string,
+  dependencies: AnkiConnectDependencies = {},
+): Promise<number[]> {
+  await ensurePermission(settings, dependencies);
+  const noteIds = await invoke<unknown>(
+    settings,
+    'findNotes',
+    { query: `tag:${getAnkiQueueTag(queueItemId)}` },
+    dependencies,
+  );
+  if (!Array.isArray(noteIds) || !noteIds.every(noteId => typeof noteId === 'number')) {
+    throw new AnkiConnectError(
+      'invalid_response',
+      'AnkiConnect returned an unexpected queued-note lookup response.',
+    );
+  }
+  return noteIds;
+}
+
+export async function removeAnkiQueueTagWithAnkiConnect(
+  settings: AnkiSettings,
+  noteId: number,
+  queueItemId: string,
+  dependencies: AnkiConnectDependencies = {},
+): Promise<void> {
+  await ensurePermission(settings, dependencies);
+  await invoke<null>(
+    settings,
+    'removeTags',
+    {
+      notes: [noteId],
+      tags: getAnkiQueueTag(queueItemId),
+    },
+    dependencies,
+  );
 }
 
 export async function getCollectionInfoWithAnkiConnect(
