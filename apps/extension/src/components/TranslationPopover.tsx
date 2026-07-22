@@ -1,6 +1,13 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import type { TranslateResponse } from '@package/shared';
 import type { TranslationFacadeErrorCode } from '@src/lib/translation-facade';
+import {
+  AnkiActions,
+  type AnkiAddState,
+  type AnkiViewState,
+} from './AnkiActions';
+
+export type { AnkiAddState, AnkiViewState } from './AnkiActions';
 
 interface LoadingState {
   kind: 'loading';
@@ -18,8 +25,6 @@ interface ErrorState {
 }
 
 export type PopoverState = LoadingState | SuccessState | ErrorState;
-export type AnkiAddState = 'idle' | 'adding' | 'added' | 'error';
-export type AnkiViewState = 'idle' | 'opening' | 'error';
 
 interface Props {
   state: PopoverState;
@@ -135,62 +140,12 @@ export function TranslationPopover({
               Translation
             </p>
             {state.data.can_add_to_anki && (
-              <div className="flex items-center gap-1">
-                {ankiState === 'added' && onViewInAnki && (
-                  <button
-                    type="button"
-                    onClick={onViewInAnki}
-                    disabled={ankiViewState === 'opening'}
-                    title="View added note in Anki"
-                    aria-label={
-                      ankiViewState === 'opening'
-                        ? 'Opening added note in Anki'
-                        : 'View added note in Anki'
-                    }
-                    className="grid size-5 place-items-center rounded border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 disabled:cursor-wait disabled:opacity-50"
-                  >
-                    <svg className="size-2.5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path
-                        d="M4.5 5.75A2.75 2.75 0 0 1 7.25 3H11v16H7.25a2.75 2.75 0 0 0-2.75 2V5.75ZM19.5 5.75A2.75 2.75 0 0 0 16.75 3H13v16h3.75a2.75 2.75 0 0 1 2.75 2V5.75Z"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={onAddToAnki}
-                  disabled={ankiState === 'adding' || ankiState === 'added'}
-                  title={ankiState === 'added' ? 'Added to Anki' : 'Add to Anki'}
-                  aria-label={
-                    ankiState === 'adding'
-                      ? 'Adding to Anki'
-                      : ankiState === 'added'
-                        ? 'Added to Anki'
-                        : ankiState === 'error'
-                          ? 'Try adding to Anki again'
-                          : 'Add to Anki'
-                  }
-                  className="grid size-5 place-items-center rounded bg-emerald-50 text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-default disabled:opacity-70"
-                >
-                  <svg
-                    className={`size-2.5 ${ankiState === 'adding' ? 'animate-pulse' : ''}`}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M12 5v14M5 12h14"
-                      stroke="currentColor"
-                      strokeWidth="2.25"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-              </div>
+              <AnkiActions
+                addState={ankiState}
+                viewState={ankiViewState}
+                onAdd={onAddToAnki}
+                onView={onViewInAnki}
+              />
             )}
           </div>
 

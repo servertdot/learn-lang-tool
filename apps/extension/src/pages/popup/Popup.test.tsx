@@ -1,0 +1,45 @@
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it, vi } from 'vitest';
+import { PopupTranslationResult } from './PopupTranslationResult';
+
+const result = {
+  source_text: 'hello',
+  translated_text: 'привет',
+  from_code: 'en',
+  to_code: 'ru',
+  can_add_to_anki: true,
+};
+
+describe('PopupTranslationResult', () => {
+  it('shows the Add to Anki action for a translated PDF selection', () => {
+    const html = renderToStaticMarkup(
+      <PopupTranslationResult
+        result={result}
+        ankiState="idle"
+        ankiViewState="idle"
+        ankiError={null}
+        onAddToAnki={vi.fn()}
+        onViewInAnki={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Add to Anki"');
+    expect(html).not.toContain('aria-label="View added note in Anki"');
+  });
+
+  it('shows the View in Anki action after the card is added', () => {
+    const html = renderToStaticMarkup(
+      <PopupTranslationResult
+        result={result}
+        ankiState="added"
+        ankiViewState="idle"
+        ankiError={null}
+        onAddToAnki={vi.fn()}
+        onViewInAnki={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Added to Anki"');
+    expect(html).toContain('aria-label="View added note in Anki"');
+  });
+});

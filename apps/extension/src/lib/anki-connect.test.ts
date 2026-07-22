@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_ANKI_SETTINGS, createAnkiNote } from './anki';
-import { addNoteWithAnkiConnect, browseNoteWithAnkiConnect } from './anki-connect';
+import {
+  addNoteWithAnkiConnect,
+  browseNoteWithAnkiConnect,
+  getCollectionInfoWithAnkiConnect,
+  getModelFieldNamesWithAnkiConnect,
+} from './anki-connect';
 
 function jsonResponse(result: unknown, error: string | null = null): Response {
   return new Response(JSON.stringify({ result, error }), {
@@ -10,10 +15,9 @@ function jsonResponse(result: unknown, error: string | null = null): Response {
 }
 
 const note = createAnkiNote(DEFAULT_ANKI_SETTINGS, {
-  expression: 'hello',
-  reading: '',
+  textFrom: 'hello',
+  textTo: 'привет',
   sentence: 'Hello there.',
-  glossary: 'привет',
 });
 
 describe('AnkiConnect client', () => {
@@ -95,6 +99,55 @@ describe('AnkiConnect client', () => {
       action: 'guiBrowse',
       version: 6,
       params: { query: 'nid:12345' },
+    });
+  });
+
+  it('loads deck and model names from the Anki collection', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ permission: 'granted', requireApiKey: false, version: 6 }),
+      )
+      .mockResolvedValueOnce(jsonResponse(['Default', 'English']))
+      .mockResolvedValueOnce(jsonResponse(['Basic', 'Basic (and reversed card)']));
+
+    await expect(
+      getCollectionInfoWithAnkiConnect(DEFAULT_ANKI_SETTINGS, { fetch: fetchMock }),
+    ).resolves.toEqual({
+      deckNames: ['Default', 'English'],
+      modelNames: ['Basic', 'Basic (and reversed card)'],
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({
+      action: 'deckNames',
+      version: 6,
+    });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body as string)).toEqual({
+      action: 'modelNames',
+      version: 6,
+    });
+  });
+
+  it('loads fields for the selected Anki model', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ permission: 'granted', requireApiKey: false, version: 6 }),
+      )
+      .mockResolvedValueOnce(jsonResponse(['Front', 'Back', 'Sentence']));
+
+    await expect(
+      getModelFieldNamesWithAnkiConnect(
+        DEFAULT_ANKI_SETTINGS,
+        'Basic with context',
+        { fetch: fetchMock },
+      ),
+    ).resolves.toEqual(['Front', 'Back', 'Sentence']);
+
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({
+      action: 'modelFieldNames',
+      version: 6,
+      params: { modelName: 'Basic with context' },
     });
   });
 });

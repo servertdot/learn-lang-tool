@@ -46,6 +46,15 @@ interface AnkiConnectDependencies {
   timeoutMs?: number;
 }
 
+export interface AnkiCollectionInfo {
+  deckNames: string[];
+  modelNames: string[];
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
 async function ensurePermission(
   settings: AnkiSettings,
   dependencies: AnkiConnectDependencies,
@@ -191,6 +200,48 @@ export async function addNoteWithAnkiConnect(
     );
   }
   return noteId;
+}
+
+export async function getCollectionInfoWithAnkiConnect(
+  settings: AnkiSettings,
+  dependencies: AnkiConnectDependencies = {},
+): Promise<AnkiCollectionInfo> {
+  await ensurePermission(settings, dependencies);
+  const [deckNames, modelNames] = await Promise.all([
+    invoke<unknown>(settings, 'deckNames', undefined, dependencies),
+    invoke<unknown>(settings, 'modelNames', undefined, dependencies),
+  ]);
+
+  if (!isStringArray(deckNames) || !isStringArray(modelNames)) {
+    throw new AnkiConnectError(
+      'invalid_response',
+      'AnkiConnect returned an unexpected deck or model list.',
+    );
+  }
+
+  return { deckNames, modelNames };
+}
+
+export async function getModelFieldNamesWithAnkiConnect(
+  settings: AnkiSettings,
+  modelName: string,
+  dependencies: AnkiConnectDependencies = {},
+): Promise<string[]> {
+  await ensurePermission(settings, dependencies);
+  const fieldNames = await invoke<unknown>(
+    settings,
+    'modelFieldNames',
+    { modelName },
+    dependencies,
+  );
+
+  if (!isStringArray(fieldNames)) {
+    throw new AnkiConnectError(
+      'invalid_response',
+      'AnkiConnect returned an unexpected model field list.',
+    );
+  }
+  return fieldNames;
 }
 
 export async function browseNoteWithAnkiConnect(

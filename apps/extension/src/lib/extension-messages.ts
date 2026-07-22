@@ -4,12 +4,21 @@ import type { TranslateRequest, TranslateResponse } from '@package/shared';
 import type { ModelPackStatus } from './model-pack-store';
 import type { TranslationFacadeErrorCode } from './translation-facade';
 import type { AnkiCardContent } from './anki';
+import type { PageTextSourceKind } from './page-text-source';
 
 export type AnkiAddNoteResponse =
   | { ok: true; noteId: number }
   | { ok: false; error: string };
 
 export type AnkiViewNoteResponse = { ok: true } | { ok: false; error: string };
+
+export type AnkiCollectionInfoResponse =
+  | { ok: true; deckNames: string[]; modelNames: string[] }
+  | { ok: false; error: string };
+
+export type AnkiModelFieldNamesResponse =
+  | { ok: true; fieldNames: string[] }
+  | { ok: false; error: string };
 
 export type LltMessage =
   | { type: 'llt.translate'; requestId: string; request: TranslateRequest }
@@ -35,6 +44,9 @@ export type LltMessage =
   | { type: 'llt.modelPack.cancel'; packId: string }
   | { type: 'llt.anki.addNote'; content: AnkiCardContent }
   | { type: 'llt.anki.viewNote'; noteId: number }
+  | { type: 'llt.anki.getCollectionInfo' }
+  | { type: 'llt.anki.getModelFieldNames'; modelName: string }
+  | { type: 'llt.frameTextSource'; text: string; sourceKind: PageTextSourceKind }
   | {
       type: 'llt.modelPack.changed';
       packId: string;

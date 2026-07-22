@@ -5,7 +5,12 @@ import {
   DEFAULT_HOTKEY,
   DEFAULT_TRANSLATION_PROVIDER,
 } from '@package/shared';
-import { DEFAULT_ANKI_SETTINGS, type AnkiSettings } from './anki';
+import {
+  DEFAULT_ANKI_SETTINGS,
+  isAnkiFieldValue,
+  type AnkiFieldMappings,
+  type AnkiSettings,
+} from './anki';
 
 const KEYS = {
   languagePair: 'languagePair',
@@ -46,15 +51,47 @@ export async function setTranslationProvider(provider: TranslationProvider): Pro
 
 export async function getAnkiSettings(): Promise<AnkiSettings> {
   const result = await browser.storage.sync.get(KEYS.ankiSettings);
-  const stored = result[KEYS.ankiSettings] as Partial<AnkiSettings> | undefined;
+  const stored = result[KEYS.ankiSettings] as
+    | (Partial<AnkiSettings> & {
+        fields?: {
+          expression?: string;
+          sentence?: string;
+          glossary?: string;
+        };
+      })
+    | undefined;
+
+  const storedMappings = Object.fromEntries(
+    Object.entries(stored?.fieldMappings ?? {}).filter(
+      (entry): entry is [string, AnkiFieldMappings[string]] =>
+        entry[1] === null || isAnkiFieldValue(entry[1]),
+    ),
+  );
+  const legacyMappings: AnkiFieldMappings = {};
+  if (stored?.fields?.expression) legacyMappings[stored.fields.expression] = 'textFrom';
+  if (stored?.fields?.glossary) legacyMappings[stored.fields.glossary] = 'textTo';
+  if (stored?.fields?.sentence) legacyMappings[stored.fields.sentence] = 'sentence';
+
   return {
-    ...DEFAULT_ANKI_SETTINGS,
-    ...stored,
-    tags: Array.isArray(stored?.tags) ? stored.tags : DEFAULT_ANKI_SETTINGS.tags,
-    fields: {
-      ...DEFAULT_ANKI_SETTINGS.fields,
-      ...stored?.fields,
-    },
+    name: typeof stored?.name === 'string' ? stored.name : DEFAULT_ANKI_SETTINGS.name,
+    serverAddress:
+      typeof stored?.serverAddress === 'string'
+        ? stored.serverAddress
+        : DEFAULT_ANKI_SETTINGS.serverAddress,
+    apiKey: typeof stored?.apiKey === 'string' ? stored.apiKey : DEFAULT_ANKI_SETTINGS.apiKey,
+    deckName:
+      typeof stored?.deckName === 'string' ? stored.deckName : DEFAULT_ANKI_SETTINGS.deckName,
+    modelName:
+      typeof stored?.modelName === 'string' ? stored.modelName : DEFAULT_ANKI_SETTINGS.modelName,
+    tags: Array.isArray(stored?.tags)
+      ? stored.tags.filter((tag): tag is string => typeof tag === 'string')
+      : DEFAULT_ANKI_SETTINGS.tags,
+    fieldMappings:
+      Object.keys(storedMappings).length > 0
+        ? storedMappings
+        : Object.keys(legacyMappings).length > 0
+          ? legacyMappings
+          : DEFAULT_ANKI_SETTINGS.fieldMappings,
   };
 }
 

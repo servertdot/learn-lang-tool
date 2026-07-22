@@ -22,6 +22,9 @@ import { getWordAtRange } from '@src/lib/word-at-caret';
 import type { LltMessage } from '@src/lib/extension-messages';
 import { lltLog } from '@src/lib/debug-log';
 import { requestAddToAnki, requestViewInAnki } from '@src/lib/messaging-anki';
+import { registerHoldHotkey } from '@src/lib/hold-hotkey';
+import { readPageTextSource, type PageTextSource } from '@src/lib/page-text-source';
+import { handleTranslationTrigger } from '@src/lib/translation-trigger';
 
 const host = document.createElement('div');
 host.id = '__llt-root';
@@ -64,6 +67,7 @@ function ContentApp() {
   const hotkeyRef = useRef<string>('Alt');
   const hotkeyLoadedRef = useRef(false);
   const contextRef = useRef<string | null>(null);
+  const pointerRef = useRef({ x: 100, y: 100 });
 
   useEffect(() => {
     getHotkey().then(k => {
@@ -105,16 +109,37 @@ function ContentApp() {
     return () => chrome.runtime.onMessage.removeListener(onMessage);
   }, []);
 
-  const showPopover = useCallback(async () => {
-    const sel = window.getSelection();
-    const selectionText = sel?.toString() ?? '';
-    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+  const readCurrentSource = useCallback(async () => {
+    let pageUrl: URL | undefined;
+    try {
+      pageUrl = new URL(window.top?.location.href ?? window.location.href);
+    } catch {
+      // Cross-origin frames fall back to their own URL inside the source reader.
+    }
+
+    return readPageTextSource({
+      window,
+      document,
+      pageUrl,
+      clipboard: navigator.clipboard
+        ? {
+            readText: () => navigator.clipboard.readText(),
+            writeText: text => navigator.clipboard.writeText(text),
+          }
+        : undefined,
+      copySelection: () => document.execCommand('copy'),
+    });
+  }, []);
+
+  const showSource = useCallback(async (source: PageTextSource) => {
+    const range = source.range;
     const { word, sentence } = range
       ? getWordAtRange(range)
       : { word: null, sentence: null };
-    const target = extractTextTarget(selectionText, word, sentence);
+    const target = extractTextTarget(source.text, word, sentence);
     lltLog('content', 'text target', {
-      selectionText: selectionText.slice(0, 120),
+      source: source.kind,
+      selectionText: source.text.slice(0, 120),
       word,
       sentence: sentence?.slice(0, 120) ?? null,
       target,
@@ -122,15 +147,9 @@ function ContentApp() {
     if (!target) return;
 
     contextRef.current = target.context;
-    let x = 100;
-    let y = 100;
-    if (sel && sel.rangeCount > 0) {
-      const rect = sel.getRangeAt(0).getClientRects()[0];
-      if (rect) {
-        x = rect.left;
-        y = rect.bottom + 8;
-      }
-    }
+    const sourceRect = range?.getClientRects()[0] ?? source.rect;
+    const x = sourceRect?.left ?? pointerRef.current.x;
+    const y = sourceRect ? sourceRect.bottom + 8 : pointerRef.current.y + 8;
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -182,6 +201,24 @@ function ContentApp() {
       );
     }
   }, []);
+
+  useEffect(() => {
+    if (window.top !== window) return;
+
+    function onFrameTextSource(message: unknown) {
+      const msg = message as LltMessage;
+      if (msg.type !== 'llt.frameTextSource') return;
+      void showSource({
+        text: msg.text,
+        kind: msg.sourceKind,
+        range: null,
+        rect: null,
+      });
+    }
+
+    chrome.runtime.onMessage.addListener(onFrameTextSource);
+    return () => chrome.runtime.onMessage.removeListener(onFrameTextSource);
+  }, [showSource]);
 
   const hidePopover = useCallback(() => {
     abortRef.current?.abort();
@@ -244,10 +281,9 @@ function ContentApp() {
 
     try {
       const noteId = await requestAddToAnki({
-        expression: data.source_text,
-        reading: '',
+        textFrom: data.source_text,
+        textTo: data.translated_text,
         sentence: popover.contextSentence ?? data.source_text,
-        glossary: data.translated_text,
       });
       setPopover(prev =>
         prev?.state.kind === 'success' && prev.state.data === data
@@ -312,20 +348,34 @@ function ContentApp() {
   }, [popover?.ankiNoteId]);
 
   useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.repeat) return;
-      if (!hotkeyLoadedRef.current) return;
-      if (e.key === hotkeyRef.current) {
-        e.preventDefault();
-        showPopover();
-      }
+    return registerHoldHotkey(window, {
+      getHotkey: () => hotkeyRef.current,
+      isReady: () => hotkeyLoadedRef.current,
+      onPress: () => {
+        void handleTranslationTrigger({
+          isTopFrame: window.top === window,
+          readSource: readCurrentSource,
+          showSource,
+          relaySource: async source => {
+            await chrome.runtime.sendMessage({
+              type: 'llt.frameTextSource',
+              text: source.text,
+              sourceKind: source.kind,
+            } satisfies LltMessage);
+          },
+        });
+      },
+    });
+  }, [readCurrentSource, showSource]);
+
+  useEffect(() => {
+    function handlePointerMove(event: PointerEvent) {
+      pointerRef.current = { x: event.clientX, y: event.clientY };
     }
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [showPopover]);
+    window.addEventListener('pointermove', handlePointerMove, { capture: true, passive: true });
+    return () => window.removeEventListener('pointermove', handlePointerMove, true);
+  }, []);
 
   useEffect(() => {
     if (!popover) return;

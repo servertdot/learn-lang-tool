@@ -16,6 +16,9 @@
   },
   "permissions": [
     "activeTab",
+    "clipboardRead",
+    "clipboardWrite",
+    "contextMenus",
     "storage",
     "offscreen"
   ],
@@ -35,6 +38,9 @@
         "https://*/*",
         "<all_urls>"
       ],
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
       "js": [
         "src/pages/content/index.tsx"
       ],

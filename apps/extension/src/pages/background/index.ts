@@ -1,5 +1,7 @@
 import type {
   AnkiAddNoteResponse,
+  AnkiCollectionInfoResponse,
+  AnkiModelFieldNamesResponse,
   AnkiViewNoteResponse,
   LltMessage,
   OffscreenResponse,
@@ -19,8 +21,16 @@ import { MAX_TRANSLATION_TEXT_LENGTH } from '@package/shared';
 import {
   addNoteWithAnkiConnect,
   browseNoteWithAnkiConnect,
+  getCollectionInfoWithAnkiConnect,
+  getModelFieldNamesWithAnkiConnect,
 } from '@src/lib/anki-connect';
 import { createAnkiNote } from '@src/lib/anki';
+import {
+  handleContextSelection,
+  openSelectionResult,
+  TRANSLATE_SELECTION_MENU_ID,
+} from '@src/lib/context-selection';
+import { savePendingSelection } from '@src/lib/pending-selection';
 
 const OFFSCREEN_URL = 'src/pages/offscreen/index.html';
 const OFFSCREEN_REASONS = ['WORKERS' as chrome.offscreen.Reason];
@@ -32,6 +42,48 @@ const googleTranslationFacade = createTranslationFacade(createGoogleTranslationE
   maxLength: MAX_TRANSLATION_TEXT_LENGTH,
 });
 const remoteTranslateAborts = new Map<string, AbortController>();
+
+function registerTranslateSelectionMenu(): void {
+  chrome.contextMenus.create(
+    {
+      id: TRANSLATE_SELECTION_MENU_ID,
+      title: 'Translate selection',
+      contexts: ['selection'],
+    },
+    () => {
+      // Reading lastError prevents duplicate-item errors from leaking on updates.
+      void chrome.runtime.lastError;
+    },
+  );
+}
+
+// Unpacked-extension Reload does not consistently emit onInstalled. Register at
+// worker startup as well; a duplicate create leaves the existing item intact.
+registerTranslateSelectionMenu();
+chrome.runtime.onInstalled.addListener(registerTranslateSelectionMenu);
+chrome.runtime.onStartup.addListener(registerTranslateSelectionMenu);
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  void handleContextSelection(info, tab ?? {}, {
+    saveSelection: savePendingSelection,
+    openPopup: async windowId => {
+      await openSelectionResult(windowId, {
+        openActionPopup: id =>
+          chrome.action.openPopup(id === undefined ? {} : { windowId: id }),
+        openWindow: async () => {
+          await chrome.windows.create({
+            url: chrome.runtime.getURL('src/pages/popup/index.html'),
+            type: 'popup',
+            width: 400,
+            height: 520,
+          });
+        },
+      });
+    },
+  }).catch(error => {
+    lltError('bg', 'context selection failed', error);
+  });
+});
 
 async function hasOffscreenDocument(): Promise<boolean> {
   const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_URL);
@@ -94,7 +146,7 @@ function broadcastPackChanged(
   });
 }
 
-chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse) => {
   if (
     message.type === 'llt.offscreen.translate' ||
     message.type === 'llt.offscreen.install' ||
@@ -110,6 +162,16 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
 
   void (async () => {
     try {
+      if (message.type === 'llt.frameTextSource') {
+        if (sender.tab?.id === undefined) {
+          sendResponse({ ok: false, error: 'Missing source tab' });
+          return;
+        }
+        await chrome.tabs.sendMessage(sender.tab.id, message, { frameId: 0 });
+        sendResponse({ ok: true });
+        return;
+      }
+
       if (message.type === 'llt.translate.cancel') {
         remoteTranslateAborts.get(message.requestId)?.abort();
         void chrome.runtime
@@ -190,6 +252,33 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
           const error = err instanceof Error ? err.message : 'Could not add the card to Anki.';
           lltError('bg', 'Anki add note failed', error);
           sendResponse({ ok: false, error } satisfies AnkiAddNoteResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.anki.getCollectionInfo') {
+        try {
+          const settings = await getAnkiSettings();
+          const info = await getCollectionInfoWithAnkiConnect(settings);
+          sendResponse({ ok: true, ...info } satisfies AnkiCollectionInfoResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not read Anki settings.';
+          sendResponse({ ok: false, error } satisfies AnkiCollectionInfoResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.anki.getModelFieldNames') {
+        try {
+          const settings = await getAnkiSettings();
+          const fieldNames = await getModelFieldNamesWithAnkiConnect(
+            settings,
+            message.modelName,
+          );
+          sendResponse({ ok: true, fieldNames } satisfies AnkiModelFieldNamesResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not read model fields.';
+          sendResponse({ ok: false, error } satisfies AnkiModelFieldNamesResponse);
         }
         return;
       }
