@@ -98,19 +98,9 @@ export default function Popup() {
   };
 
   return (
-    <main className="min-h-[180px] bg-slate-50 p-4 text-slate-950">
-      <header className="mb-4 flex items-center gap-2">
-        <span className="grid size-8 place-items-center rounded-xl bg-indigo-600 text-sm font-bold text-white">
-          L
-        </span>
-        <div>
-          <h1 className="text-sm font-semibold">Learn Lang Tool</h1>
-          <p className="text-[11px] text-slate-500">Selection translation</p>
-        </div>
-      </header>
-
+    <main className="bg-white text-slate-950">
       {state.kind === 'empty' && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="p-4">
           <p className="text-sm font-medium">Translate text from any page</p>
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
             Select text, right-click it, then choose <strong>Translate selection</strong>. This
@@ -120,7 +110,7 @@ export default function Popup() {
       )}
 
       {state.kind === 'loading' && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" role="status">
+        <section className="p-4" role="status">
           <p className="text-sm font-semibold text-indigo-700">Translating…</p>
           {state.sourceText && (
             <p className="mt-3 line-clamp-4 text-xs leading-relaxed text-slate-500">
@@ -138,11 +128,12 @@ export default function Popup() {
           ankiError={ankiError}
           onAddToAnki={() => void handleAddToAnki()}
           onViewInAnki={() => void handleViewInAnki()}
+          onOpenSettings={() => void chrome.runtime.openOptionsPage()}
         />
       )}
 
       {state.kind === 'error' && (
-        <section className="rounded-2xl border border-rose-200 bg-white p-4 shadow-sm" role="alert">
+        <section className="p-4" role="alert">
           <p className="text-sm font-semibold text-rose-700">Couldn’t translate</p>
           <p className="mt-1 text-xs leading-relaxed text-slate-500">{state.message}</p>
           <button

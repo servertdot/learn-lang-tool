@@ -42,6 +42,8 @@ export type AnkiQueueExportResponse =
 
 export type AnkiQueueClearResponse = { ok: true } | { ok: false; error: string };
 
+export type OpenOptionsPageResponse = { ok: true } | { ok: false; error: string };
+
 export type LltMessage =
   | { type: 'llt.translate'; requestId: string; request: TranslateRequest }
   | { type: 'llt.translate.cancel'; requestId: string }
@@ -72,6 +74,7 @@ export type LltMessage =
   | { type: 'llt.anki.queue.sync' }
   | { type: 'llt.anki.queue.export'; format: AnkiExportFormat }
   | { type: 'llt.anki.queue.clear' }
+  | { type: 'llt.openOptionsPage' }
   | { type: 'llt.frameTextSource'; text: string; sourceKind: PageTextSourceKind }
   | {
       type: 'llt.modelPack.changed';

@@ -5,6 +5,7 @@ import {
   type AnkiAddState,
   type AnkiViewState,
 } from '../../components/AnkiActions';
+import { SettingsAction } from '../../components/SettingsAction';
 
 interface PopupTranslationResultProps {
   result: TranslateResponse;
@@ -13,6 +14,7 @@ interface PopupTranslationResultProps {
   ankiError: string | null;
   onAddToAnki: () => void;
   onViewInAnki: () => void;
+  onOpenSettings: () => void;
 }
 
 export function PopupTranslationResult({
@@ -22,21 +24,25 @@ export function PopupTranslationResult({
   ankiError,
   onAddToAnki,
   onViewInAnki,
+  onOpenSettings,
 }: PopupTranslationResultProps) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="bg-white p-4">
       <div className="flex min-h-5 items-center justify-between gap-3">
         <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
           Translation
         </p>
-        {result.can_add_to_anki && (
-          <AnkiActions
-            addState={ankiState}
-            viewState={ankiViewState}
-            onAdd={onAddToAnki}
-            onView={onViewInAnki}
-          />
-        )}
+        <div className="flex items-center gap-1">
+          {result.can_add_to_anki && (
+            <AnkiActions
+              addState={ankiState}
+              viewState={ankiViewState}
+              onAdd={onAddToAnki}
+              onView={onViewInAnki}
+            />
+          )}
+          <SettingsAction onOpen={onOpenSettings} />
+        </div>
       </div>
       <p className="mt-1 text-[15px] font-medium leading-relaxed">{result.translated_text}</p>
 

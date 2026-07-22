@@ -6,6 +6,7 @@ import {
   type AnkiAddState,
   type AnkiViewState,
 } from './AnkiActions';
+import { SettingsAction } from './SettingsAction';
 
 export type { AnkiAddState, AnkiViewState } from './AnkiActions';
 
@@ -32,6 +33,7 @@ interface Props {
   onAddToAnki?: () => void;
   onViewInAnki?: () => void;
   onInstallModelPack?: () => void;
+  onOpenSettings: () => void;
   ankiState?: AnkiAddState;
   ankiViewState?: AnkiViewState;
   ankiError?: string | null;
@@ -43,6 +45,7 @@ export function TranslationPopover({
   onAddToAnki,
   onViewInAnki,
   onInstallModelPack,
+  onOpenSettings,
   ankiState = 'idle',
   ankiViewState = 'idle',
   ankiError,
@@ -139,14 +142,17 @@ export function TranslationPopover({
             <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
               Translation
             </p>
-            {state.data.can_add_to_anki && (
-              <AnkiActions
-                addState={ankiState}
-                viewState={ankiViewState}
-                onAdd={onAddToAnki}
-                onView={onViewInAnki}
-              />
-            )}
+            <div className="flex items-center gap-1">
+              {state.data.can_add_to_anki && (
+                <AnkiActions
+                  addState={ankiState}
+                  viewState={ankiViewState}
+                  onAdd={onAddToAnki}
+                  onView={onViewInAnki}
+                />
+              )}
+              <SettingsAction onOpen={onOpenSettings} />
+            </div>
           </div>
 
           {(ankiState === 'error' || ankiViewState === 'error') && ankiError && (

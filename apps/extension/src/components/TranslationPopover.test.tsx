@@ -20,11 +20,13 @@ describe('TranslationPopover', () => {
         ankiState="added"
         onAddToAnki={vi.fn()}
         onViewInAnki={vi.fn()}
+        onOpenSettings={vi.fn()}
       />,
     );
 
     expect(html).toContain('aria-label="Added to Anki"');
     expect(html).toContain('aria-label="View added note in Anki"');
+    expect(html).toContain('aria-label="Open settings"');
     expect(html).toContain('Translation');
     expect(html).toContain('Original');
     expect(html).toContain('привет');
@@ -49,6 +51,7 @@ describe('TranslationPopover', () => {
         position={{ x: 0, y: 0 }}
         ankiState="queued"
         onAddToAnki={vi.fn()}
+        onOpenSettings={vi.fn()}
       />,
     );
 

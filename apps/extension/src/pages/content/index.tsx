@@ -20,11 +20,12 @@ import {
 } from '@src/lib/model-pack-registry';
 import { getWordAtRange } from '@src/lib/word-at-caret';
 import type { LltMessage } from '@src/lib/extension-messages';
-import { lltLog } from '@src/lib/debug-log';
+import { lltError, lltLog } from '@src/lib/debug-log';
 import { requestAddToAnki, requestViewInAnki } from '@src/lib/messaging-anki';
 import { registerHoldHotkey } from '@src/lib/hold-hotkey';
 import { readPageTextSource, type PageTextSource } from '@src/lib/page-text-source';
 import { handleTranslationTrigger } from '@src/lib/translation-trigger';
+import { requestOpenExtensionOptions } from '@src/lib/open-extension-options';
 
 const host = document.createElement('div');
 host.id = '__llt-root';
@@ -403,6 +404,11 @@ function ContentApp() {
       ankiState={popover.ankiState}
       ankiViewState={popover.ankiViewState}
       ankiError={popover.ankiError}
+      onOpenSettings={() => {
+        void requestOpenExtensionOptions().catch(error => {
+          lltError('content', 'Could not open extension settings', error);
+        });
+      }}
       onInstallModelPack={
         popover.state.kind === 'error' && popover.state.code === 'model_pack_missing'
           ? handleInstallModelPack

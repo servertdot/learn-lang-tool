@@ -20,10 +20,12 @@ describe('PopupTranslationResult', () => {
         ankiError={null}
         onAddToAnki={vi.fn()}
         onViewInAnki={vi.fn()}
+        onOpenSettings={vi.fn()}
       />,
     );
 
     expect(html).toContain('aria-label="Add to Anki"');
+    expect(html).toContain('aria-label="Open settings"');
     expect(html).not.toContain('aria-label="View added note in Anki"');
   });
 
@@ -36,6 +38,7 @@ describe('PopupTranslationResult', () => {
         ankiError={null}
         onAddToAnki={vi.fn()}
         onViewInAnki={vi.fn()}
+        onOpenSettings={vi.fn()}
       />,
     );
 
@@ -52,6 +55,7 @@ describe('PopupTranslationResult', () => {
         ankiError={null}
         onAddToAnki={vi.fn()}
         onViewInAnki={vi.fn()}
+        onOpenSettings={vi.fn()}
       />,
     );
 

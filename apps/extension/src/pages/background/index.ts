@@ -9,6 +9,7 @@ import type {
   AnkiViewNoteResponse,
   LltMessage,
   OffscreenResponse,
+  OpenOptionsPageResponse,
 } from '@src/lib/extension-messages';
 import { createChromeModelPackPersistence } from '@src/lib/model-pack-persistence';
 import { createModelPackStore } from '@src/lib/model-pack-store';
@@ -40,6 +41,7 @@ import {
   TRANSLATE_SELECTION_MENU_ID,
 } from '@src/lib/context-selection';
 import { savePendingSelection } from '@src/lib/pending-selection';
+import { openExtensionOptionsPage } from '@src/lib/open-extension-options';
 
 const OFFSCREEN_URL = 'src/pages/offscreen/index.html';
 const OFFSCREEN_REASONS = ['WORKERS' as chrome.offscreen.Reason];
@@ -218,6 +220,12 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
 
   void (async () => {
     try {
+      if (message.type === 'llt.openOptionsPage') {
+        await openExtensionOptionsPage();
+        sendResponse({ ok: true } satisfies OpenOptionsPageResponse);
+        return;
+      }
+
       if (message.type === 'llt.frameTextSource') {
         if (sender.tab?.id === undefined) {
           sendResponse({ ok: false, error: 'Missing source tab' });
