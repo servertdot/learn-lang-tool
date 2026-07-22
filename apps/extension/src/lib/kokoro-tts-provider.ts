@@ -5,7 +5,7 @@ import {
   type PronunciationArtifact,
   type PronunciationRequest,
 } from './audio-tts-provider';
-import { encodePcm16Wav } from './pronunciation-artifact-store';
+import { encodeMonoMp3, MP3_SAMPLE_RATE_HZ } from './mp3-audio-encoder';
 import { KOKORO_EN_SPEECH_PACK } from './speech-model-pack-registry';
 
 const KOKORO_MODEL_ID = KOKORO_EN_SPEECH_PACK.huggingfaceModelId;
@@ -94,7 +94,7 @@ function asVoice(voiceId: string): 'af_heart' {
 
 /**
  * Kokoro-backed AudioTtsProvider. Loads ONNX weights via Transformers.js
- * (Cache API / installed speech model pack) and returns PCM16 WAV artifacts.
+ * (Cache API / installed speech model pack) and returns MP3 artifacts.
  */
 export function createKokoroAudioTtsProvider(): AudioTtsProvider {
   return {
@@ -150,9 +150,9 @@ export function createKokoroAudioTtsProvider(): AudioTtsProvider {
 
       let bytes: Uint8Array;
       try {
-        bytes = encodePcm16Wav(rawAudio.audio, rawAudio.sampling_rate);
+        bytes = await encodeMonoMp3(rawAudio.audio, rawAudio.sampling_rate);
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'WAV encoding failed.';
+        const message = error instanceof Error ? error.message : 'MP3 encoding failed.';
         throw new TtsError('artifact_encoding_failed', message);
       }
 
@@ -161,9 +161,9 @@ export function createKokoroAudioTtsProvider(): AudioTtsProvider {
         artifactKey,
         filename,
         bytes,
-        mimeType: 'audio/wav',
-        extension: 'wav',
-        sampleRate: rawAudio.sampling_rate,
+        mimeType: 'audio/mpeg',
+        extension: 'mp3',
+        sampleRate: MP3_SAMPLE_RATE_HZ,
         language: request.language,
         voiceId: request.voiceId,
         speed: request.speed,

@@ -39,7 +39,7 @@ describe('tts provider language registry', () => {
       providerRevision: 'v1.0',
       voiceId: 'af_heart',
       speed: 1,
-      encodingVersion: 1,
+      encodingVersion: 2,
     });
   });
 

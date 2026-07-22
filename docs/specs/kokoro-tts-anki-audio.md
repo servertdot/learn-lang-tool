@@ -98,7 +98,7 @@ Kokoro is hidden behind an `AudioTtsProvider` capability. Language support, mode
 
 - Enforce at most one active playback. Playing another artifact stops the current one. Replaying uses cached encoded bytes. Dismissing a result stops playback. Unqueued preview generation may be cancelled when its result is dismissed; a pronunciation job referenced by a queued card continues independently.
 
-- Encode the initial artifact as mono PCM16 WAV at Kokoro's effective output sample rate. This avoids adding a second lossy audio encoder to the first release and is accepted by Anki media playback. Keep MIME type and extension provider-neutral so a future provider may return MP3, Opus, or another supported format.
+- Encode artifacts as mono MP3 at 24 kHz and 64 kbps. MP3 is the most portable audio format across Anki desktop, AnkiWeb, and mobile clients, while keeping synced media substantially smaller than PCM16 WAV. Keep MIME type and extension provider-neutral so a future provider may return another supported format.
 
 - Compute a deterministic artifact key and filename from normalized source text, normalized language, provider ID, provider/model revision, voice ID, speed, and encoding version. Do not include the raw source text in the filename. Retries for the same request must resolve to the same media filename.
 
@@ -142,7 +142,7 @@ Kokoro is hidden behind an `AudioTtsProvider` capability. Language support, mode
 
 - Test model-pack behavior through its existing high-level installer/store seam: explicit consent is presentation behavior, while installer tests cover cached assets, pinned manifest interpretation, cancellation, partial failure, readiness, and retry. Do not assert individual internal fetch order unless ordering is externally required.
 
-- Do not download the roughly 90 MB Kokoro model in the normal unit-test suite. Add a separately invoked local smoke test or fixture-driven integration test that loads the pinned real pack, generates a short English sample, validates a non-empty decodable WAV, and records generation time for developer inspection. It must not make CI correctness depend on subjective voice quality.
+- Do not download the roughly 90 MB Kokoro model in the normal unit-test suite. Add a separately invoked local smoke test or fixture-driven integration test that loads the pinned real pack, generates a short English sample, validates a non-empty decodable MP3, and records generation time for developer inspection. It must not make CI correctness depend on subjective voice quality.
 
 - Perform manual acceptance checks on supported Chrome and Firefox desktop builds. Verify first pack installation, cold and warm generation, a single word, a short phrase, a sentence, punctuation, numbers, rapid selection replacement, popover dismissal, playback interruption, Anki open, Anki closed, restart with queued audio, and AnkiWeb-compatible media playback.
 

@@ -23,7 +23,8 @@ describe('computeArtifactIdentity', () => {
 
     expect(first).toEqual(second);
     expect(first.artifactKey).toMatch(/^pron:[0-9a-f]{64}$/);
-    expect(first.filename).toMatch(/^llt_[0-9a-f]{24}\.wav$/);
+    expect(PRONUNCIATION_ENCODING_VERSION).toBe(2);
+    expect(first.filename).toMatch(/^llt_[0-9a-f]{24}\.mp3$/);
     expect(first.filename).not.toContain('hello');
   });
 

@@ -161,10 +161,10 @@ describe('AnkiQueue', () => {
     await store.put(
       {
         artifactKey: 'pron:abc',
-        filename: 'llt_abc.wav',
+        filename: 'llt_abc.mp3',
         bytes: new Uint8Array([1, 2, 3]),
-        mimeType: 'audio/wav',
-        extension: 'wav',
+        mimeType: 'audio/mpeg',
+        extension: 'mp3',
         sampleRate: 24000,
         language: 'en',
         voiceId: 'af_heart',
@@ -191,7 +191,7 @@ describe('AnkiQueue', () => {
       DEFAULT_ANKI_SETTINGS,
       expect.objectContaining({ deckName: 'English' }),
       {
-        filename: 'llt_abc.wav',
+        filename: 'llt_abc.mp3',
         data: btoa(String.fromCharCode(1, 2, 3)),
         fields: ['Reading'],
       },

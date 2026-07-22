@@ -39,10 +39,10 @@ const result: TranslateResponse = {
 function fakeArtifact(request: PronunciationRequest): PronunciationArtifact {
   return {
     artifactKey: 'pending',
-    filename: 'pending.wav',
+    filename: 'pending.mp3',
     bytes: new Uint8Array([9, 9, 9]),
-    mimeType: 'audio/wav',
-    extension: 'wav',
+    mimeType: 'audio/mpeg',
+    extension: 'mp3',
     sampleRate: 24000,
     language: request.language,
     voiceId: request.voiceId,
@@ -161,7 +161,7 @@ describe('queue-first pronunciation and Anki sync', () => {
       providerRevision: 'v1.0',
       voiceId: 'af_heart',
       speed: 1,
-      encodingVersion: 1,
+      encodingVersion: 2,
     };
 
     const enqueued = await enqueueCardWithRequiredAudio(queue, {
@@ -212,7 +212,7 @@ describe('queue-first pronunciation and Anki sync', () => {
       providerRevision: 'v1.0',
       voiceId: 'af_heart',
       speed: 1,
-      encodingVersion: 1,
+      encodingVersion: 2,
     };
 
     await enqueueCardWithRequiredAudio(queue, { note, pronunciationRequest });

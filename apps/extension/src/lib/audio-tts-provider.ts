@@ -57,7 +57,7 @@ export interface AudioTtsProvider {
   ): Promise<PronunciationArtifact>;
 }
 
-export const PRONUNCIATION_ENCODING_VERSION = 1;
+export const PRONUNCIATION_ENCODING_VERSION = 2;
 export const DEFAULT_PRONUNCIATION_SPEED = 1;
 
 function normalizeLanguageTag(language: string): string {
@@ -92,7 +92,7 @@ export async function computeArtifactIdentity(
 
   const hash = await sha256Hex(material);
   const artifactKey = `pron:${hash}`;
-  const filename = `llt_${hash.slice(0, 24)}.wav`;
+  const filename = `llt_${hash.slice(0, 24)}.mp3`;
   return { artifactKey, filename };
 }
 

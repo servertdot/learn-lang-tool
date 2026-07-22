@@ -3,7 +3,7 @@ import { getAnkiAudioFieldNames, type AnkiCardContent, type AnkiSettings } from 
 import type { AnkiConnectAudioAttachment } from './anki-connect';
 import type { AnkiQueue } from './anki-queue';
 import type { PronunciationRequest } from './audio-tts-provider';
-import { bytesToBase64 } from './pronunciation-artifact-store';
+import { base64ToBytes, bytesToBase64 } from './pronunciation-artifact-store';
 import type { PronunciationArtifactStore } from './pronunciation-artifact-store';
 import {
   enqueueCardWithRequiredAudio,
@@ -78,7 +78,6 @@ export async function preparePronunciation(
             voiceId: string;
             speed: number;
           };
-          const { base64ToBytes } = await import('./pronunciation-artifact-store');
           return {
             artifactKey: artifact.artifactKey,
             filename: artifact.filename,
@@ -220,7 +219,6 @@ export async function fulfillAndSyncAudioQueue(
         voiceId: string;
         speed: number;
       };
-      const { base64ToBytes } = await import('./pronunciation-artifact-store');
       return {
         artifactKey: artifact.artifactKey,
         filename: artifact.filename,

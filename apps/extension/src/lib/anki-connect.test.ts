@@ -54,7 +54,7 @@ describe('AnkiConnect client', () => {
       .mockResolvedValueOnce(jsonResponse(99));
 
     const audio = {
-      filename: 'llt_abc123.wav',
+      filename: 'llt_abc123.mp3',
       data: 'UklGRg==',
       fields: ['Reading'],
     };
