@@ -15,22 +15,67 @@ type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrai
 
 let kokoroPromise: Promise<KokoroInstance> | null = null;
 
+export interface KokoroOrtEnv {
+  wasmPaths: unknown;
+}
+
+export interface TransformersOrtWasmEnv {
+  backends: {
+    onnx?: {
+      wasm?: {
+        wasmPaths?: unknown;
+        numThreads?: number;
+        proxy?: boolean;
+      };
+    };
+  };
+}
+
 /**
- * Point ONNX Runtime at extension-packaged WASM.
- * Transformers.js defaults to jsdelivr, which MV3 CSP blocks.
+ * Point ONNX Runtime at extension-packaged WASM and disable thread-pool workers.
+ * Threaded ORT workers run without `document` and throw in MV3 offscreen.
+ * Transformers.js otherwise defaults to jsdelivr, which MV3 CSP blocks.
  */
+export function configureKokoroOrtRuntime(
+  kokoroEnv: KokoroOrtEnv,
+  transformersEnv: TransformersOrtWasmEnv,
+  getUrl: (path: string) => string = path => chrome.runtime.getURL(path),
+): void {
+  const wasmPaths = getUrl('ort/');
+  kokoroEnv.wasmPaths = wasmPaths;
+  const wasm = transformersEnv.backends.onnx?.wasm;
+  if (!wasm) {
+    throw new Error('Transformers.js ONNX WASM backend is unavailable.');
+  }
+  wasm.wasmPaths = wasmPaths;
+  // onnxruntime-web thread workers have no DOM; single-thread avoids "document is not defined".
+  wasm.numThreads = 1;
+  wasm.proxy = false;
+}
+
+/** @deprecated Use configureKokoroOrtRuntime */
 export function configureKokoroOrtWasmPaths(
-  env: { wasmPaths: unknown },
+  env: KokoroOrtEnv,
   getUrl: (path: string) => string = path => chrome.runtime.getURL(path),
 ): void {
   env.wasmPaths = getUrl('ort/');
 }
 
 async function loadKokoro(): Promise<KokoroInstance> {
+  if (typeof document === 'undefined') {
+    throw new TtsError(
+      'generation_failed',
+      'Kokoro speech synthesis must run in the offscreen document, not the service worker.',
+    );
+  }
+
   if (!kokoroPromise) {
     kokoroPromise = (async () => {
+      // Configure ORT before Kokoro constructs a session. Import transformers first so we
+      // can disable thread-pool workers (they throw "document is not defined" in MV3).
+      const { env: transformersEnv } = await import('@huggingface/transformers');
       const { KokoroTTS, env } = await import('kokoro-js');
-      configureKokoroOrtWasmPaths(env);
+      configureKokoroOrtRuntime(env, transformersEnv);
       return KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
         dtype: 'q8',
         device: 'wasm',
@@ -80,6 +125,7 @@ export function createKokoroAudioTtsProvider(): AudioTtsProvider {
         if (signal?.aborted) {
           throw new TtsError('request_cancelled', 'Pronunciation preparation was cancelled.');
         }
+        if (error instanceof TtsError) throw error;
         const message = error instanceof Error ? error.message : 'Failed to load Kokoro model.';
         throw new TtsError('model_pack_invalid', message);
       }

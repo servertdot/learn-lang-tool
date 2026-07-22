@@ -63,9 +63,12 @@ import { openExtensionOptionsPage } from '@src/lib/open-extension-options';
 import { enqueueCardWithRequiredAudio } from '@src/lib/pronunciation-workflow';
 
 const OFFSCREEN_URL = 'src/pages/offscreen/index.html';
-const OFFSCREEN_REASONS = ['WORKERS' as chrome.offscreen.Reason];
+const OFFSCREEN_REASONS = [
+  'WORKERS' as chrome.offscreen.Reason,
+  'AUDIO_PLAYBACK' as chrome.offscreen.Reason,
+];
 const OFFSCREEN_JUSTIFICATION =
-  'Run on-device Bergamot translation and Kokoro speech synthesis outside content scripts.';
+  'Run on-device Bergamot translation and Kokoro speech synthesis with local audio playback.';
 
 const modelPackStore = createModelPackStore(createChromeModelPackPersistence());
 const speechModelPackStore = createModelPackStore(createChromeSpeechModelPackPersistence());
