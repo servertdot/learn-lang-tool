@@ -44,6 +44,36 @@ export type AnkiQueueClearResponse = { ok: true } | { ok: false; error: string }
 
 export type OpenOptionsPageResponse = { ok: true } | { ok: false; error: string };
 
+export type PronunciationPrepareResponse =
+  | {
+      ok: true;
+      requestId: string;
+      uiState: import('./pronunciation-workflow').PronunciationUiState;
+      artifactKey?: string;
+      speechModelPackId?: string;
+      approxSizeBytes?: number;
+      errorCode?: string;
+      errorMessage?: string;
+      pronunciationRequest?: import('./audio-tts-provider').PronunciationRequest;
+    }
+  | { ok: false; error: string };
+
+export type PronunciationPlaybackResponse = { ok: true } | { ok: false; error: string };
+
+export type SpeechModelPackStatusResponse =
+  | {
+      ok: true;
+      packId: string;
+      status: ModelPackStatus;
+      errorMessage?: string;
+      approxSizeBytes?: number;
+    }
+  | { ok: false; error: string };
+
+export type SpeechModelPackInstallResponse =
+  | { ok: true }
+  | { ok: false; error?: string; aborted?: boolean };
+
 export type LltMessage =
   | { type: 'llt.translate'; requestId: string; request: TranslateRequest }
   | { type: 'llt.translate.cancel'; requestId: string }
@@ -66,7 +96,29 @@ export type LltMessage =
     }
   | { type: 'llt.modelPack.install'; packId: string }
   | { type: 'llt.modelPack.cancel'; packId: string }
-  | { type: 'llt.anki.addNote'; content: AnkiCardContent }
+  | { type: 'llt.speechModelPack.getStatus'; packId: string }
+  | { type: 'llt.speechModelPack.install'; packId: string }
+  | { type: 'llt.speechModelPack.cancel'; packId: string }
+  | {
+      type: 'llt.speechModelPack.changed';
+      packId: string;
+      status: ModelPackStatus;
+      errorMessage?: string;
+    }
+  | {
+      type: 'llt.pronunciation.prepare';
+      requestId: string;
+      result: TranslateResponse;
+    }
+  | { type: 'llt.pronunciation.cancel'; requestId: string }
+  | { type: 'llt.pronunciation.play'; artifactKey: string }
+  | { type: 'llt.pronunciation.stop' }
+  | {
+      type: 'llt.anki.addNote';
+      content: AnkiCardContent;
+      pronunciationRequest?: import('./audio-tts-provider').PronunciationRequest;
+      artifactKey?: string;
+    }
   | { type: 'llt.anki.viewNote'; noteId: number }
   | { type: 'llt.anki.getCollectionInfo' }
   | { type: 'llt.anki.getModelFieldNames'; modelName: string }
@@ -85,9 +137,31 @@ export type LltMessage =
   | { type: 'llt.offscreen.translate'; request: TranslateRequest; requestId?: string }
   | { type: 'llt.offscreen.install'; packId: string }
   | { type: 'llt.offscreen.cancelInstall' }
-  | { type: 'llt.offscreen.abortTranslate'; requestId: string };
+  | { type: 'llt.offscreen.abortTranslate'; requestId: string }
+  | {
+      type: 'llt.offscreen.synthesize';
+      requestId: string;
+      pronunciationRequest: import('./audio-tts-provider').PronunciationRequest;
+    }
+  | { type: 'llt.offscreen.abortSynthesize'; requestId: string }
+  | { type: 'llt.offscreen.playArtifact'; artifactKey: string; dataBase64: string; mimeType: string }
+  | { type: 'llt.offscreen.stopPlayback' };
 
 export type OffscreenResponse =
   | { ok: true; result: TranslateResponse }
+  | {
+      ok: true;
+      artifact: {
+        artifactKey: string;
+        filename: string;
+        dataBase64: string;
+        mimeType: string;
+        extension: string;
+        sampleRate: number;
+        language: string;
+        voiceId: string;
+        speed: number;
+      };
+    }
   | { ok: true }
-  | { ok: false; error: string; aborted?: boolean };
+  | { ok: false; error: string; aborted?: boolean; code?: string };

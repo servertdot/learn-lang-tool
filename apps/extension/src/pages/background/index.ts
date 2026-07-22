@@ -10,6 +10,10 @@ import type {
   LltMessage,
   OffscreenResponse,
   OpenOptionsPageResponse,
+  PronunciationPlaybackResponse,
+  PronunciationPrepareResponse,
+  SpeechModelPackInstallResponse,
+  SpeechModelPackStatusResponse,
 } from '@src/lib/extension-messages';
 import { createChromeModelPackPersistence } from '@src/lib/model-pack-persistence';
 import { createModelPackStore } from '@src/lib/model-pack-store';
@@ -18,6 +22,21 @@ import {
   cancelModelPackInstall,
   installModelPackFiles,
 } from '@src/lib/model-pack-installer';
+import { createChromeSpeechModelPackPersistence } from '@src/lib/speech-model-pack-persistence';
+import {
+  cancelSpeechModelPackInstall,
+  installSpeechModelPackFiles,
+} from '@src/lib/speech-model-pack-installer';
+import { getSpeechModelPack } from '@src/lib/speech-model-pack-registry';
+import { createIndexedDbPronunciationArtifactStore } from '@src/lib/pronunciation-artifact-idb-store';
+import {
+  cancelPronunciationPrepare,
+  fulfillAndSyncAudioQueue,
+  playPronunciationArtifact,
+  preparePronunciation,
+  stopPronunciationPlayback,
+} from '@src/lib/pronunciation-runtime';
+import { getAnkiAudioFieldNames, createAnkiNote } from '@src/lib/anki';
 import { lltError, lltLog } from '@src/lib/debug-log';
 import { getAnkiSettings, getTranslationProvider } from '@src/lib/storage';
 import { createGoogleTranslationEngine } from '@src/lib/google-translation-engine';
@@ -31,7 +50,6 @@ import {
   getModelFieldNamesWithAnkiConnect,
   removeAnkiQueueTagWithAnkiConnect,
 } from '@src/lib/anki-connect';
-import { createAnkiNote } from '@src/lib/anki';
 import { exportAnkiQueue } from '@src/lib/anki-export';
 import { AnkiQueue, createChromeAnkiQueueStorage } from '@src/lib/anki-queue';
 import { syncAnkiQueue } from '@src/lib/anki-queue-sync';
@@ -42,13 +60,16 @@ import {
 } from '@src/lib/context-selection';
 import { savePendingSelection } from '@src/lib/pending-selection';
 import { openExtensionOptionsPage } from '@src/lib/open-extension-options';
+import { enqueueCardWithRequiredAudio } from '@src/lib/pronunciation-workflow';
 
 const OFFSCREEN_URL = 'src/pages/offscreen/index.html';
 const OFFSCREEN_REASONS = ['WORKERS' as chrome.offscreen.Reason];
 const OFFSCREEN_JUSTIFICATION =
-  'Run the on-device Bergamot translation engine outside content scripts.';
+  'Run on-device Bergamot translation and Kokoro speech synthesis outside content scripts.';
 
 const modelPackStore = createModelPackStore(createChromeModelPackPersistence());
+const speechModelPackStore = createModelPackStore(createChromeSpeechModelPackPersistence());
+const pronunciationArtifactStore = createIndexedDbPronunciationArtifactStore();
 const googleTranslationFacade = createTranslationFacade(createGoogleTranslationEngine(), {
   maxLength: MAX_TRANSLATION_TEXT_LENGTH,
 });
@@ -57,12 +78,26 @@ const ANKI_QUEUE_SYNC_ALARM = 'llt.anki.syncQueue';
 const ankiQueue = new AnkiQueue(createChromeAnkiQueueStorage());
 let ankiQueueSyncPromise: ReturnType<typeof runAnkiQueueSync> | null = null;
 
+const pronunciationRuntime = {
+  speechPackStore: speechModelPackStore,
+  artifactStore: pronunciationArtifactStore,
+  ankiQueue,
+  ensureOffscreenDocument,
+  sendToOffscreen,
+};
+
 async function runAnkiQueueSync() {
+  await fulfillAndSyncAudioQueue(pronunciationRuntime).catch(error =>
+    lltError('bg', 'Queued pronunciation fulfill failed', error),
+  );
   const settings = await getAnkiSettings();
   return syncAnkiQueue(ankiQueue, settings, {
     findNoteIds: findQueuedNoteIdsWithAnkiConnect,
-    addNote: addNoteWithAnkiConnect,
+    addNote: (ankiSettings, note, audio) =>
+      addNoteWithAnkiConnect(ankiSettings, note, {}, audio),
     removeQueueTag: removeAnkiQueueTagWithAnkiConnect,
+    artifactStore: pronunciationArtifactStore,
+    audioFieldsForNote: ankiSettings => getAnkiAudioFieldNames(ankiSettings),
   });
 }
 
@@ -204,16 +239,37 @@ function broadcastPackChanged(
   });
 }
 
+function broadcastSpeechPackChanged(
+  packId: string,
+  status: Awaited<ReturnType<typeof speechModelPackStore.getStatus>>,
+  errorMessage?: string,
+): void {
+  const msg: LltMessage = {
+    type: 'llt.speechModelPack.changed',
+    packId,
+    status,
+    errorMessage,
+  };
+  void chrome.runtime.sendMessage(msg).catch(() => {
+    /* no listeners */
+  });
+}
+
 chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse) => {
   if (
     message.type === 'llt.offscreen.translate' ||
     message.type === 'llt.offscreen.install' ||
     message.type === 'llt.offscreen.cancelInstall' ||
     message.type === 'llt.offscreen.abortTranslate' ||
+    message.type === 'llt.offscreen.synthesize' ||
+    message.type === 'llt.offscreen.abortSynthesize' ||
+    message.type === 'llt.offscreen.playArtifact' ||
+    message.type === 'llt.offscreen.stopPlayback' ||
     message.type === 'llt.translate.result' ||
     message.type === 'llt.translate.error' ||
     message.type === 'llt.modelPack.changed' ||
-    message.type === 'llt.modelPack.status'
+    message.type === 'llt.modelPack.status' ||
+    message.type === 'llt.speechModelPack.changed'
   ) {
     return false;
   }
@@ -306,16 +362,152 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
         return;
       }
 
+      if (message.type === 'llt.speechModelPack.getStatus') {
+        try {
+          const pack = getSpeechModelPack(message.packId);
+          const status = await speechModelPackStore.getStatus(message.packId);
+          const state = await speechModelPackStore.getState(message.packId);
+          sendResponse({
+            ok: true,
+            packId: message.packId,
+            status,
+            errorMessage: state?.errorMessage,
+            approxSizeBytes: pack?.approxSizeBytes,
+          } satisfies SpeechModelPackStatusResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not read speech model pack status.';
+          sendResponse({ ok: false, error } satisfies SpeechModelPackStatusResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.speechModelPack.install') {
+        try {
+          const pack = getSpeechModelPack(message.packId);
+          if (!pack) {
+            sendResponse({
+              ok: false,
+              error: `Unknown speech model pack: ${message.packId}`,
+            } satisfies SpeechModelPackInstallResponse);
+            return;
+          }
+          await speechModelPackStore.markDownloading(message.packId);
+          broadcastSpeechPackChanged(message.packId, 'downloading');
+          await installSpeechModelPackFiles(message.packId);
+          await speechModelPackStore.markReady(message.packId);
+          broadcastSpeechPackChanged(message.packId, 'ready');
+          sendResponse({ ok: true } satisfies SpeechModelPackInstallResponse);
+        } catch (err) {
+          const aborted =
+            (err instanceof DOMException && err.name === 'AbortError') ||
+            (err instanceof Error && err.name === 'AbortError');
+
+          if (aborted) {
+            await speechModelPackStore.markCancelled(message.packId);
+            broadcastSpeechPackChanged(message.packId, 'missing');
+            sendResponse({ ok: false, aborted: true } satisfies SpeechModelPackInstallResponse);
+            return;
+          }
+
+          const error = err instanceof Error ? err.message : 'Speech model pack install failed';
+          await speechModelPackStore.markFailed(message.packId, error);
+          broadcastSpeechPackChanged(message.packId, 'failed', error);
+          sendResponse({ ok: false, error } satisfies SpeechModelPackInstallResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.speechModelPack.cancel') {
+        cancelSpeechModelPackInstall();
+        await speechModelPackStore.markCancelled(message.packId);
+        broadcastSpeechPackChanged(message.packId, 'missing');
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (message.type === 'llt.pronunciation.prepare') {
+        try {
+          const state = await preparePronunciation(
+            message.requestId,
+            message.result,
+            pronunciationRuntime,
+          );
+          sendResponse({
+            ok: true,
+            requestId: state.requestId,
+            uiState: state.uiState,
+            artifactKey: state.artifactKey,
+            speechModelPackId: state.speechModelPackId,
+            approxSizeBytes: state.approxSizeBytes,
+            errorCode: state.errorCode,
+            errorMessage: state.errorMessage,
+            pronunciationRequest: state.pronunciationRequest,
+          } satisfies PronunciationPrepareResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not prepare pronunciation.';
+          sendResponse({ ok: false, error } satisfies PronunciationPrepareResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.pronunciation.cancel') {
+        cancelPronunciationPrepare(message.requestId);
+        void sendToOffscreen({
+          type: 'llt.offscreen.abortSynthesize',
+          requestId: message.requestId,
+        }).catch(() => undefined);
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (message.type === 'llt.pronunciation.play') {
+        try {
+          await playPronunciationArtifact(message.artifactKey, pronunciationRuntime);
+          sendResponse({ ok: true } satisfies PronunciationPlaybackResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not play pronunciation.';
+          sendResponse({ ok: false, error } satisfies PronunciationPlaybackResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.pronunciation.stop') {
+        try {
+          await stopPronunciationPlayback(pronunciationRuntime);
+          sendResponse({ ok: true } satisfies PronunciationPlaybackResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not stop pronunciation.';
+          sendResponse({ ok: false, error } satisfies PronunciationPlaybackResponse);
+        }
+        return;
+      }
+
       if (message.type === 'llt.anki.addNote') {
         try {
           const settings = await getAnkiSettings();
           const note = createAnkiNote(settings, message.content);
-          const item = await ankiQueue.enqueue(note);
+          let itemId: string;
+          if (message.pronunciationRequest) {
+            const enqueued = await enqueueCardWithRequiredAudio(
+              ankiQueue,
+              {
+                note,
+                pronunciationRequest: message.pronunciationRequest,
+                artifactKey: message.artifactKey,
+              },
+              pronunciationArtifactStore,
+            );
+            itemId = enqueued.itemId;
+          } else {
+            const item = await ankiQueue.enqueue(note);
+            itemId = item.id;
+          }
+
           await updateAnkiQueueSyncAlarm();
           const syncResult = await syncQueuedAnkiCards();
           const info = await ankiQueue.getInfo();
           await updateAnkiQueueSyncAlarm();
-          const noteId = syncResult.noteIds[item.id];
+          const noteId = syncResult.noteIds[itemId];
           if (noteId !== undefined) {
             sendResponse({
               ok: true,
@@ -379,7 +571,13 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
 
       if (message.type === 'llt.anki.queue.clear') {
         try {
-          await ankiQueue.clear();
+          const cleared = await ankiQueue.clear();
+          const referenced = new Set(
+            cleared.map(item => item.artifactKey).filter((key): key is string => Boolean(key)),
+          );
+          // Clear removes all queue refs; drop unreferenced pronunciation artifacts.
+          await pronunciationArtifactStore.deleteUnreferenced(new Set());
+          void referenced;
           await updateAnkiQueueSyncAlarm();
           sendResponse({ ok: true } satisfies AnkiQueueClearResponse);
         } catch (err) {

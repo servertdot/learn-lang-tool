@@ -23,6 +23,7 @@
   "dependencies": {
     "@browsermt/bergamot-translator": "0.4.9",
     "@package/shared": "workspace:^",
+    "kokoro-js": "^1.2.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "webextension-polyfill": "^0.12.0"

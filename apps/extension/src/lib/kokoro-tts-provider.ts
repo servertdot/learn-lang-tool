@@ -1,0 +1,123 @@
+import {
+  computeArtifactIdentity,
+  TtsError,
+  type AudioTtsProvider,
+  type PronunciationArtifact,
+  type PronunciationRequest,
+} from './audio-tts-provider';
+import { encodePcm16Wav } from './pronunciation-artifact-store';
+import { KOKORO_EN_SPEECH_PACK } from './speech-model-pack-registry';
+
+const KOKORO_MODEL_ID = KOKORO_EN_SPEECH_PACK.huggingfaceModelId;
+
+type KokoroModule = typeof import('kokoro-js');
+type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrained']>>;
+
+let kokoroPromise: Promise<KokoroInstance> | null = null;
+
+async function loadKokoro(): Promise<KokoroInstance> {
+  if (!kokoroPromise) {
+    kokoroPromise = (async () => {
+      const { KokoroTTS } = await import('kokoro-js');
+      return KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
+        dtype: 'q8',
+        device: 'wasm',
+      });
+    })().catch(error => {
+      kokoroPromise = null;
+      throw error;
+    });
+  }
+  return kokoroPromise;
+}
+
+function asVoice(voiceId: string): 'af_heart' {
+  return voiceId as 'af_heart';
+}
+
+/**
+ * Kokoro-backed AudioTtsProvider. Loads ONNX weights via Transformers.js
+ * (Cache API / installed speech model pack) and returns PCM16 WAV artifacts.
+ */
+export function createKokoroAudioTtsProvider(): AudioTtsProvider {
+  return {
+    id: 'kokoro',
+    revision: KOKORO_EN_SPEECH_PACK.providerRevision,
+    supportsLanguage(language) {
+      const normalized = language.trim().toLowerCase().split(/[_-]/)[0];
+      return normalized === 'en';
+    },
+    requiredModelPackIds(language) {
+      return this.supportsLanguage(language) ? [KOKORO_EN_SPEECH_PACK.id] : [];
+    },
+    async synthesize(request, signal) {
+      if (!this.supportsLanguage(request.language)) {
+        throw new TtsError(
+          'language_unsupported',
+          `Kokoro does not support language “${request.language}”.`,
+        );
+      }
+      if (signal?.aborted) {
+        throw new TtsError('request_cancelled', 'Pronunciation preparation was cancelled.');
+      }
+
+      let tts: KokoroInstance;
+      try {
+        tts = await loadKokoro();
+      } catch (error) {
+        if (signal?.aborted) {
+          throw new TtsError('request_cancelled', 'Pronunciation preparation was cancelled.');
+        }
+        const message = error instanceof Error ? error.message : 'Failed to load Kokoro model.';
+        throw new TtsError('model_pack_invalid', message);
+      }
+
+      if (signal?.aborted) {
+        throw new TtsError('request_cancelled', 'Pronunciation preparation was cancelled.');
+      }
+
+      let rawAudio: { audio: Float32Array; sampling_rate: number };
+      try {
+        rawAudio = await tts.generate(request.text, {
+          voice: asVoice(request.voiceId),
+          speed: request.speed,
+        });
+      } catch (error) {
+        if (signal?.aborted) {
+          throw new TtsError('request_cancelled', 'Pronunciation preparation was cancelled.');
+        }
+        const message = error instanceof Error ? error.message : 'Speech generation failed.';
+        throw new TtsError('generation_failed', message);
+      }
+
+      let bytes: Uint8Array;
+      try {
+        bytes = encodePcm16Wav(rawAudio.audio, rawAudio.sampling_rate);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'WAV encoding failed.';
+        throw new TtsError('artifact_encoding_failed', message);
+      }
+
+      const { artifactKey, filename } = await computeArtifactIdentity(request);
+      const artifact: PronunciationArtifact = {
+        artifactKey,
+        filename,
+        bytes,
+        mimeType: 'audio/wav',
+        extension: 'wav',
+        sampleRate: rawAudio.sampling_rate,
+        language: request.language,
+        voiceId: request.voiceId,
+        speed: request.speed,
+      };
+      return artifact;
+    },
+  };
+}
+
+/** Test helper: clear the cached Kokoro singleton between tests. */
+export function resetKokoroAudioTtsProviderForTests(): void {
+  kokoroPromise = null;
+}
+
+export type { PronunciationRequest };

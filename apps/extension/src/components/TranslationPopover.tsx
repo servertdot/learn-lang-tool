@@ -6,9 +6,14 @@ import {
   type AnkiAddState,
   type AnkiViewState,
 } from './AnkiActions';
+import {
+  PronunciationControl,
+  type PronunciationControlState,
+} from './PronunciationControl';
 import { SettingsAction } from './SettingsAction';
 
 export type { AnkiAddState, AnkiViewState } from './AnkiActions';
+export type { PronunciationControlState } from './PronunciationControl';
 
 interface LoadingState {
   kind: 'loading';
@@ -37,6 +42,13 @@ interface Props {
   ankiState?: AnkiAddState;
   ankiViewState?: AnkiViewState;
   ankiError?: string | null;
+  pronunciationState?: PronunciationControlState | null;
+  pronunciationError?: string | null;
+  pronunciationApproxSizeBytes?: number;
+  onPlayPronunciation?: () => void;
+  onStopPronunciation?: () => void;
+  onRetryPronunciation?: () => void;
+  onInstallSpeechPack?: () => void;
 }
 
 export function TranslationPopover({
@@ -49,6 +61,13 @@ export function TranslationPopover({
   ankiState = 'idle',
   ankiViewState = 'idle',
   ankiError,
+  pronunciationState = null,
+  pronunciationError,
+  pronunciationApproxSizeBytes,
+  onPlayPronunciation,
+  onStopPronunciation,
+  onRetryPronunciation,
+  onInstallSpeechPack,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -176,9 +195,22 @@ export function TranslationPopover({
 
           <div className="my-3 border-t border-slate-200" />
 
-          <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
-            Original
-          </p>
+          <div className="flex min-h-5 items-center justify-between gap-3">
+            <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
+              Original
+            </p>
+            {pronunciationState && (
+              <PronunciationControl
+                state={pronunciationState}
+                approxSizeBytes={pronunciationApproxSizeBytes}
+                errorMessage={pronunciationError}
+                onPlay={onPlayPronunciation}
+                onStop={onStopPronunciation}
+                onRetry={onRetryPronunciation}
+                onInstallSpeechPack={onInstallSpeechPack}
+              />
+            )}
+          </div>
           <p className="mt-1 text-[13px] leading-relaxed text-slate-600">
             {state.data.source_text}
           </p>

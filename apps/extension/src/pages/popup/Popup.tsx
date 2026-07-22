@@ -1,13 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import type { TranslateResponse } from '@package/shared';
-import { requestAddToAnki, requestViewInAnki } from '@src/lib/messaging-anki';
+import { requestViewInAnki } from '@src/lib/messaging-anki';
+import {
+  requestAddToAnkiWithPronunciation,
+  requestPronunciationPlay,
+  requestPronunciationPrepare,
+  requestPronunciationStop,
+  requestSpeechModelPackInstall,
+} from '@src/lib/messaging-pronunciation';
+import type { PronunciationRequest } from '@src/lib/audio-tts-provider';
 import { createProductTranslationFacade } from '@src/lib/product-translator';
 import { getLanguagePair } from '@src/lib/storage';
 import { takePendingSelection } from '@src/lib/pending-selection';
-import {
-  PopupTranslationResult,
-} from './PopupTranslationResult';
+import { formatApproxSize } from '@src/lib/speech-model-pack-registry';
+import { PopupTranslationResult } from './PopupTranslationResult';
 import type { AnkiAddState, AnkiViewState } from '@src/components/AnkiActions';
+import type { PronunciationControlState } from '@src/components/PronunciationControl';
 
 type PopupState =
   | { kind: 'loading'; sourceText: string }
@@ -23,6 +31,19 @@ export default function Popup() {
   const [ankiViewState, setAnkiViewState] = useState<AnkiViewState>('idle');
   const [ankiError, setAnkiError] = useState<string | null>(null);
   const [ankiNoteId, setAnkiNoteId] = useState<number | null>(null);
+  const [pronunciationRequestId, setPronunciationRequestId] = useState<string | null>(null);
+  const [pronunciationState, setPronunciationState] = useState<PronunciationControlState | null>(
+    null,
+  );
+  const [pronunciationError, setPronunciationError] = useState<string | null>(null);
+  const [pronunciationApproxSizeBytes, setPronunciationApproxSizeBytes] = useState<
+    number | undefined
+  >();
+  const [pronunciationArtifactKey, setPronunciationArtifactKey] = useState<string | undefined>();
+  const [pronunciationRequest, setPronunciationRequest] = useState<
+    PronunciationRequest | undefined
+  >();
+  const [speechPackIdForInstall, setSpeechPackIdForInstall] = useState<string | undefined>();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -47,6 +68,24 @@ export default function Popup() {
           controller.signal,
         );
         setState({ kind: 'success', result });
+        if (result.can_add_to_anki) {
+          const requestId = crypto.randomUUID();
+          setPronunciationRequestId(requestId);
+          setPronunciationState('preparing');
+          const response = await requestPronunciationPrepare(requestId, result);
+          if (controller.signal.aborted) return;
+          if (!response.ok) {
+            setPronunciationState('failed');
+            setPronunciationError(response.error);
+            return;
+          }
+          setPronunciationState(response.uiState);
+          setPronunciationError(response.errorMessage ?? null);
+          setPronunciationApproxSizeBytes(response.approxSizeBytes);
+          setPronunciationArtifactKey(response.artifactKey);
+          setSpeechPackIdForInstall(response.speechModelPackId);
+          setPronunciationRequest(response.pronunciationRequest);
+        }
       } catch (error) {
         if (controller.signal.aborted) return;
         setState({
@@ -57,7 +96,10 @@ export default function Popup() {
       }
     })();
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      void requestPronunciationStop();
+    };
   }, []);
 
   const handleAddToAnki = async () => {
@@ -68,11 +110,31 @@ export default function Popup() {
     setAnkiError(null);
 
     try {
-      const addResult = await requestAddToAnki({
-        textFrom: result.source_text,
-        textTo: result.translated_text,
-        sentence: result.source_text,
-      });
+      if (pronunciationState === 'pack_missing' && speechPackIdForInstall) {
+        const sizeLabel = pronunciationApproxSizeBytes
+          ? formatApproxSize(pronunciationApproxSizeBytes)
+          : '';
+        const ok = window.confirm(
+          `Download the speech model pack${sizeLabel ? ` (${sizeLabel})` : ''} to add pronunciation to Anki? Selected text stays on your device.`,
+        );
+        if (!ok) {
+          setAnkiState('idle');
+          return;
+        }
+        await requestSpeechModelPackInstall(speechPackIdForInstall);
+      }
+
+      const addResult = await requestAddToAnkiWithPronunciation(
+        {
+          textFrom: result.source_text,
+          textTo: result.translated_text,
+          sentence: result.source_text,
+        },
+        {
+          pronunciationRequest,
+          artifactKey: pronunciationArtifactKey,
+        },
+      );
       setAnkiNoteId(addResult.status === 'synced' ? addResult.noteId : null);
       setAnkiState(addResult.status === 'synced' ? 'added' : 'queued');
       setAnkiViewState('idle');
@@ -95,6 +157,55 @@ export default function Popup() {
       setAnkiViewState('error');
       setAnkiError(error instanceof Error ? error.message : 'Could not open the card in Anki.');
     }
+  };
+
+  const handlePlayPronunciation = async () => {
+    if (!pronunciationArtifactKey) return;
+    setPronunciationState('playing');
+    const response = await requestPronunciationPlay(pronunciationArtifactKey);
+    if (!response.ok) {
+      setPronunciationState('failed');
+      setPronunciationError(response.error);
+      return;
+    }
+    setPronunciationState('stopped');
+  };
+
+  const handleRetryPronunciation = async () => {
+    if (state.kind !== 'success' || !pronunciationRequestId) return;
+    setPronunciationState('preparing');
+    setPronunciationError(null);
+    const response = await requestPronunciationPrepare(pronunciationRequestId, state.result);
+    if (!response.ok) {
+      setPronunciationState('failed');
+      setPronunciationError(response.error);
+      return;
+    }
+    setPronunciationState(response.uiState);
+    setPronunciationError(response.errorMessage ?? null);
+    setPronunciationApproxSizeBytes(response.approxSizeBytes);
+    setPronunciationArtifactKey(response.artifactKey);
+    setSpeechPackIdForInstall(response.speechModelPackId);
+    setPronunciationRequest(response.pronunciationRequest);
+  };
+
+  const handleInstallSpeechPack = async () => {
+    if (!speechPackIdForInstall) return;
+    const sizeLabel = pronunciationApproxSizeBytes
+      ? formatApproxSize(pronunciationApproxSizeBytes)
+      : '';
+    const ok = window.confirm(
+      `Download the speech model pack${sizeLabel ? ` (${sizeLabel})` : ''}? Selected text stays on your device.`,
+    );
+    if (!ok) return;
+    setPronunciationState('preparing');
+    const install = await requestSpeechModelPackInstall(speechPackIdForInstall);
+    if (!install.ok) {
+      setPronunciationState('failed');
+      setPronunciationError(install.error ?? 'Speech model pack download failed.');
+      return;
+    }
+    await handleRetryPronunciation();
   };
 
   return (
@@ -129,6 +240,16 @@ export default function Popup() {
           onAddToAnki={() => void handleAddToAnki()}
           onViewInAnki={() => void handleViewInAnki()}
           onOpenSettings={() => void chrome.runtime.openOptionsPage()}
+          pronunciationState={pronunciationState}
+          pronunciationError={pronunciationError}
+          pronunciationApproxSizeBytes={pronunciationApproxSizeBytes}
+          onPlayPronunciation={() => void handlePlayPronunciation()}
+          onStopPronunciation={() => {
+            void requestPronunciationStop();
+            setPronunciationState('stopped');
+          }}
+          onRetryPronunciation={() => void handleRetryPronunciation()}
+          onInstallSpeechPack={() => void handleInstallSpeechPack()}
         />
       )}
 

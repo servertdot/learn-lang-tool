@@ -1,6 +1,7 @@
-export const ANKI_FIELD_VALUES = ['textFrom', 'textTo', 'sentence'] as const;
+export const ANKI_FIELD_VALUES = ['textFrom', 'textTo', 'sentence', 'audio'] as const;
 
 export type AnkiFieldValue = (typeof ANKI_FIELD_VALUES)[number];
+export type AnkiTextFieldValue = Exclude<AnkiFieldValue, 'audio'>;
 export type AnkiFieldMappings = Record<string, AnkiFieldValue | null>;
 
 export interface AnkiSettings {
@@ -38,7 +39,7 @@ export const DEFAULT_ANKI_SETTINGS: AnkiSettings = {
   tags: ['yomitan'],
   fieldMappings: {
     Word: 'textFrom',
-    Reading: null,
+    Reading: 'audio',
     Sentence: 'sentence',
     Meaning: 'textTo',
   },
@@ -48,9 +49,16 @@ export function isAnkiFieldValue(value: unknown): value is AnkiFieldValue {
   return typeof value === 'string' && ANKI_FIELD_VALUES.includes(value as AnkiFieldValue);
 }
 
+export function isAnkiTextFieldValue(value: AnkiFieldValue): value is AnkiTextFieldValue {
+  return value !== 'audio';
+}
+
 export function inferAnkiFieldValue(fieldName: string): AnkiFieldValue | null {
   const name = fieldName.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
+  if (['audio', 'sound', 'reading', 'pronunciation'].some(marker => name.includes(marker))) {
+    return 'audio';
+  }
   if (
     ['front', 'textfrom', 'source', 'original', 'word', 'expression', 'term'].some(marker =>
       name.includes(marker),
@@ -85,14 +93,22 @@ export function reconcileAnkiFieldMappings(
   );
 }
 
+/** Model fields that should receive the AnkiConnect `[sound:...]` attachment. */
+export function getAnkiAudioFieldNames(settings: AnkiSettings): string[] {
+  return Object.entries(settings.fieldMappings)
+    .filter(([, value]) => value === 'audio')
+    .map(([fieldName]) => fieldName);
+}
+
 export function createAnkiNote(
   settings: AnkiSettings,
   content: AnkiCardContent,
 ): AnkiNote {
   const fields = Object.fromEntries(
-    Object.entries(settings.fieldMappings).flatMap(([fieldName, value]) =>
-      value ? [[fieldName, content[value]]] : [],
-    ),
+    Object.entries(settings.fieldMappings).flatMap(([fieldName, value]) => {
+      if (!value || !isAnkiTextFieldValue(value)) return [];
+      return [[fieldName, content[value]]];
+    }),
   );
 
   return {

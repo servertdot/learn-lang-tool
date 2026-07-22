@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createAnkiNote,
   DEFAULT_ANKI_SETTINGS,
+  getAnkiAudioFieldNames,
   reconcileAnkiFieldMappings,
 } from './anki';
 
@@ -49,9 +50,31 @@ describe('createAnkiNote', () => {
     });
   });
 
+  it('omits audio-mapped fields from text content (AnkiConnect attaches media)', () => {
+    const settings = {
+      ...DEFAULT_ANKI_SETTINGS,
+      fieldMappings: {
+        Word: 'textFrom' as const,
+        Reading: 'audio' as const,
+        Meaning: 'textTo' as const,
+      },
+    };
+    const note = createAnkiNote(settings, {
+      textFrom: 'hello',
+      textTo: 'привет',
+      sentence: 'Hello there.',
+    });
+
+    expect(note.fields).toEqual({
+      Word: 'hello',
+      Meaning: 'привет',
+    });
+    expect(getAnkiAudioFieldNames(settings)).toEqual(['Reading']);
+  });
+
   it('preserves matching choices and infers common model field names', () => {
     expect(
-      reconcileAnkiFieldMappings(['Word', 'Translation', 'Example', 'Audio'], {
+      reconcileAnkiFieldMappings(['Word', 'Translation', 'Example', 'Audio', 'Reading'], {
         Word: 'sentence',
         OldField: 'textFrom',
       }),
@@ -59,7 +82,12 @@ describe('createAnkiNote', () => {
       Word: 'sentence',
       Translation: 'textTo',
       Example: 'sentence',
-      Audio: null,
+      Audio: 'audio',
+      Reading: 'audio',
     });
+  });
+
+  it('defaults Reading to the audio semantic mapping', () => {
+    expect(DEFAULT_ANKI_SETTINGS.fieldMappings.Reading).toBe('audio');
   });
 });

@@ -6,6 +6,7 @@ import {
   type AnkiAddState,
   type AnkiViewState,
   type PopoverState,
+  type PronunciationControlState,
 } from '@src/components/TranslationPopover';
 import { extractTextTarget } from '@src/lib/extract-text-target';
 import { createProductTranslationFacade } from '@src/lib/product-translator';
@@ -21,11 +22,21 @@ import {
 import { getWordAtRange } from '@src/lib/word-at-caret';
 import type { LltMessage } from '@src/lib/extension-messages';
 import { lltError, lltLog } from '@src/lib/debug-log';
-import { requestAddToAnki, requestViewInAnki } from '@src/lib/messaging-anki';
+import { requestViewInAnki } from '@src/lib/messaging-anki';
+import {
+  requestAddToAnkiWithPronunciation,
+  requestPronunciationCancel,
+  requestPronunciationPlay,
+  requestPronunciationPrepare,
+  requestPronunciationStop,
+  requestSpeechModelPackInstall,
+} from '@src/lib/messaging-pronunciation';
+import type { PronunciationRequest } from '@src/lib/audio-tts-provider';
 import { registerHoldHotkey } from '@src/lib/hold-hotkey';
 import { readPageTextSource, type PageTextSource } from '@src/lib/page-text-source';
 import { handleTranslationTrigger } from '@src/lib/translation-trigger';
 import { requestOpenExtensionOptions } from '@src/lib/open-extension-options';
+import { formatApproxSize as formatSpeechSize } from '@src/lib/speech-model-pack-registry';
 
 const host = document.createElement('div');
 host.id = '__llt-root';
@@ -60,6 +71,13 @@ interface PopoverData {
   ankiViewState: AnkiViewState;
   ankiError: string | null;
   ankiNoteId: number | null;
+  pronunciationRequestId: string | null;
+  pronunciationState: PronunciationControlState | null;
+  pronunciationError: string | null;
+  pronunciationApproxSizeBytes?: number;
+  pronunciationArtifactKey?: string;
+  pronunciationRequest?: PronunciationRequest;
+  speechPackIdForInstall?: string;
 }
 
 function ContentApp() {
@@ -169,6 +187,9 @@ function ContentApp() {
       ankiViewState: 'idle',
       ankiError: null,
       ankiNoteId: null,
+      pronunciationRequestId: null,
+      pronunciationState: null,
+      pronunciationError: null,
     });
 
     try {
@@ -176,15 +197,49 @@ function ContentApp() {
         { text: target.text, from_code: pair.from_code, to_code: pair.to_code },
         controller.signal,
       );
+      const pronunciationRequestId = crypto.randomUUID();
       setPopover(prev =>
         prev
           ? {
               ...prev,
               state: { kind: 'success', data },
               contextSentence: contextRef.current,
+              pronunciationRequestId,
+              pronunciationState: data.can_add_to_anki ? 'preparing' : null,
+              pronunciationError: null,
             }
           : null,
       );
+
+      if (data.can_add_to_anki) {
+        void requestPronunciationPrepare(pronunciationRequestId, data).then(response => {
+          setPopover(prev => {
+            if (
+              !prev ||
+              prev.pronunciationRequestId !== pronunciationRequestId ||
+              prev.state.kind !== 'success'
+            ) {
+              return prev;
+            }
+            if (!response.ok) {
+              return {
+                ...prev,
+                pronunciationState: 'failed',
+                pronunciationError: response.error,
+              };
+            }
+            return {
+              ...prev,
+              pronunciationState: response.uiState,
+              pronunciationError: response.errorMessage ?? null,
+              pronunciationApproxSizeBytes: response.approxSizeBytes,
+              pronunciationArtifactKey: response.artifactKey,
+              speechPackIdForInstall: response.speechModelPackId,
+              pronunciationRequest: response.pronunciationRequest,
+            };
+          });
+        });
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       if (err instanceof TranslationFacadeError) {
@@ -225,8 +280,13 @@ function ContentApp() {
   const hidePopover = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    const requestId = popover?.pronunciationRequestId;
+    if (requestId) {
+      void requestPronunciationCancel(requestId);
+    }
+    void requestPronunciationStop();
     setPopover(null);
-  }, []);
+  }, [popover?.pronunciationRequestId]);
 
   const handleInstallModelPack = useCallback(async () => {
     if (!popover?.packIdForInstall) return;
@@ -267,6 +327,63 @@ function ContentApp() {
     }
   }, [popover?.packIdForInstall]);
 
+  const handleRetryPronunciation = useCallback(() => {
+    if (!popover || popover.state.kind !== 'success' || !popover.pronunciationRequestId) return;
+    const { data } = popover.state;
+    const requestId = popover.pronunciationRequestId;
+    setPopover(prev =>
+      prev ? { ...prev, pronunciationState: 'preparing', pronunciationError: null } : null,
+    );
+    void requestPronunciationPrepare(requestId, data).then(response => {
+      setPopover(prev => {
+        if (!prev || prev.pronunciationRequestId !== requestId) return prev;
+        if (!response.ok) {
+          return {
+            ...prev,
+            pronunciationState: 'failed',
+            pronunciationError: response.error,
+          };
+        }
+        return {
+          ...prev,
+          pronunciationState: response.uiState,
+          pronunciationError: response.errorMessage ?? null,
+          pronunciationApproxSizeBytes: response.approxSizeBytes,
+          pronunciationArtifactKey: response.artifactKey,
+          speechPackIdForInstall: response.speechModelPackId,
+        };
+      });
+    });
+  }, [popover]);
+
+  const handleInstallSpeechPack = useCallback(async () => {
+    if (!popover?.speechPackIdForInstall) return;
+    const sizeLabel = popover.pronunciationApproxSizeBytes
+      ? formatSpeechSize(popover.pronunciationApproxSizeBytes)
+      : '';
+    const ok = window.confirm(
+      `Download the speech model pack${sizeLabel ? ` (${sizeLabel})` : ''}? Selected text stays on your device.`,
+    );
+    if (!ok) return;
+    setPopover(prev =>
+      prev ? { ...prev, pronunciationState: 'preparing', pronunciationError: null } : null,
+    );
+    const install = await requestSpeechModelPackInstall(popover.speechPackIdForInstall);
+    if (!install.ok) {
+      setPopover(prev =>
+        prev
+          ? {
+              ...prev,
+              pronunciationState: 'failed',
+              pronunciationError: install.error ?? 'Speech model pack download failed.',
+            }
+          : null,
+      );
+      return;
+    }
+    handleRetryPronunciation();
+  }, [popover, handleRetryPronunciation]);
+
   const handleAddToAnki = useCallback(async () => {
     if (!popover || popover.state.kind !== 'success') return;
 
@@ -282,11 +399,31 @@ function ContentApp() {
     );
 
     try {
-      const addResult = await requestAddToAnki({
-        textFrom: data.source_text,
-        textTo: data.translated_text,
-        sentence: popover.contextSentence ?? data.source_text,
-      });
+      if (popover.pronunciationState === 'pack_missing' && popover.speechPackIdForInstall) {
+        const sizeLabel = popover.pronunciationApproxSizeBytes
+          ? formatSpeechSize(popover.pronunciationApproxSizeBytes)
+          : '';
+        const ok = window.confirm(
+          `Download the speech model pack${sizeLabel ? ` (${sizeLabel})` : ''} to add pronunciation to Anki? Selected text stays on your device.`,
+        );
+        if (!ok) {
+          setPopover(prev => (prev ? { ...prev, ankiState: 'idle' } : null));
+          return;
+        }
+        await requestSpeechModelPackInstall(popover.speechPackIdForInstall);
+      }
+
+      const addResult = await requestAddToAnkiWithPronunciation(
+        {
+          textFrom: data.source_text,
+          textTo: data.translated_text,
+          sentence: popover.contextSentence ?? data.source_text,
+        },
+        {
+          pronunciationRequest: popover.pronunciationRequest,
+          artifactKey: popover.pronunciationArtifactKey,
+        },
+      );
       setPopover(prev =>
         prev?.state.kind === 'success' && prev.state.data === data
           ? {
@@ -310,6 +447,34 @@ function ContentApp() {
       );
     }
   }, [popover]);
+
+  const handlePlayPronunciation = useCallback(async () => {
+    if (!popover?.pronunciationArtifactKey) return;
+    setPopover(prev => (prev ? { ...prev, pronunciationState: 'playing' } : null));
+    const response = await requestPronunciationPlay(popover.pronunciationArtifactKey);
+    if (!response.ok) {
+      setPopover(prev =>
+        prev
+          ? {
+              ...prev,
+              pronunciationState: 'failed',
+              pronunciationError: response.error,
+            }
+          : null,
+      );
+      return;
+    }
+    setPopover(prev =>
+      prev?.pronunciationState === 'playing' ? { ...prev, pronunciationState: 'stopped' } : prev,
+    );
+  }, [popover?.pronunciationArtifactKey]);
+
+  const handleStopPronunciation = useCallback(() => {
+    void requestPronunciationStop();
+    setPopover(prev =>
+      prev?.pronunciationState === 'playing' ? { ...prev, pronunciationState: 'stopped' } : prev,
+    );
+  }, []);
 
   const handleViewInAnki = useCallback(async () => {
     if (!popover?.ankiNoteId) return;
@@ -404,6 +569,13 @@ function ContentApp() {
       ankiState={popover.ankiState}
       ankiViewState={popover.ankiViewState}
       ankiError={popover.ankiError}
+      pronunciationState={popover.pronunciationState}
+      pronunciationError={popover.pronunciationError}
+      pronunciationApproxSizeBytes={popover.pronunciationApproxSizeBytes}
+      onPlayPronunciation={() => void handlePlayPronunciation()}
+      onStopPronunciation={handleStopPronunciation}
+      onRetryPronunciation={handleRetryPronunciation}
+      onInstallSpeechPack={() => void handleInstallSpeechPack()}
       onOpenSettings={() => {
         void requestOpenExtensionOptions().catch(error => {
           lltError('content', 'Could not open extension settings', error);

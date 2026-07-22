@@ -181,17 +181,32 @@ async function invoke<T>(
   }
 }
 
+export interface AnkiConnectAudioAttachment {
+  filename: string;
+  data: string;
+  fields: string[];
+}
+
 export async function addNoteWithAnkiConnect(
   settings: AnkiSettings,
   note: AnkiNote,
   dependencies: AnkiConnectDependencies = {},
+  audio?: AnkiConnectAudioAttachment,
 ): Promise<number> {
   await ensurePermission(settings, dependencies);
+
+  const notePayload =
+    audio === undefined
+      ? note
+      : {
+          ...note,
+          audio: [audio],
+        };
 
   const noteId = await invoke<number | null>(
     settings,
     'addNote',
-    { note },
+    { note: notePayload },
     dependencies,
   );
   if (typeof noteId !== 'number') {

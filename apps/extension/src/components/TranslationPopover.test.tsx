@@ -21,18 +21,44 @@ describe('TranslationPopover', () => {
         onAddToAnki={vi.fn()}
         onViewInAnki={vi.fn()}
         onOpenSettings={vi.fn()}
+        pronunciationState="ready"
+        onPlayPronunciation={vi.fn()}
       />,
     );
 
     expect(html).toContain('aria-label="Added to Anki"');
     expect(html).toContain('aria-label="View added note in Anki"');
     expect(html).toContain('aria-label="Open settings"');
+    expect(html).toContain('aria-label="Play pronunciation"');
     expect(html).toContain('Translation');
     expect(html).toContain('Original');
     expect(html).toContain('привет');
     expect(html).toContain('hello');
     expect(html).not.toContain('source-code');
     expect(html).not.toContain('target-code');
+  });
+
+  it('shows preparing pronunciation beside the original text', () => {
+    const html = renderToStaticMarkup(
+      <TranslationPopover
+        state={{
+          kind: 'success',
+          data: {
+            source_text: 'hello',
+            translated_text: 'привет',
+            from_code: 'en',
+            to_code: 'ru',
+            can_add_to_anki: true,
+          },
+        }}
+        position={{ x: 0, y: 0 }}
+        onOpenSettings={vi.fn()}
+        pronunciationState="preparing"
+      />,
+    );
+
+    expect(html).toContain('Preparing audio…');
+    expect(html).toContain('aria-label="Preparing pronunciation"');
   });
 
   it('explains that a card is safely queued while Anki is closed', () => {

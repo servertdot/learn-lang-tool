@@ -59,3 +59,19 @@ _Avoid_: press-to-translate, toggle translate
 **Optional translation backend**:
 HTTP translation services kept in the monorepo for development or future use, not required for the product translation path.
 _Avoid_: required API, primary translator
+
+**Speech model pack**:
+The downloadable speech assets (model weights, tokenizer, and related data) for a TTS provider revision. Installed with explicit user consent, separately from translation model packs; after install, pronunciation works offline.
+_Avoid_: voice pack, language pack (ambiguous with UI i18n), Kokoro download (provider-specific)
+
+**Pronunciation request**:
+A provider-neutral description of what should be synthesized: exact source text, normalized speech language, provider identity/revision, voice, speed, and encoding version. Queue entries retain the request so artifacts can be recreated without storing audio bytes in the queue.
+_Avoid_: TTS job, synthesis recipe (informal), utterance payload
+
+**Pronunciation artifact**:
+The encoded audio bytes plus metadata produced for a pronunciation request (MIME type, extension, sample rate, deterministic filename/key, and effective voice/speed). Preview playback and Anki media use the same artifact.
+_Avoid_: audio blob, media file, WAV (format-specific)
+
+**TTS provider**:
+The capability that converts a pronunciation request into a pronunciation artifact. Kokoro is the initial provider; the product selects by source language through a provider-language registry.
+_Avoid_: speech engine, voice API, synthesizer service

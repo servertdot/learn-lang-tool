@@ -45,6 +45,37 @@ describe('AnkiConnect client', () => {
     });
   });
 
+  it('attaches base64 audio with a deterministic filename and mapped fields', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ permission: 'granted', requireApiKey: false, version: 6 }),
+      )
+      .mockResolvedValueOnce(jsonResponse(99));
+
+    const audio = {
+      filename: 'llt_abc123.wav',
+      data: 'UklGRg==',
+      fields: ['Reading'],
+    };
+
+    await expect(
+      addNoteWithAnkiConnect(DEFAULT_ANKI_SETTINGS, note, { fetch: fetchMock }, audio),
+    ).resolves.toBe(99);
+
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(body).toEqual({
+      action: 'addNote',
+      version: 6,
+      params: {
+        note: {
+          ...note,
+          audio: [audio],
+        },
+      },
+    });
+  });
+
   it('stops when Anki denies origin permission', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ permission: 'denied' }));
     await expect(

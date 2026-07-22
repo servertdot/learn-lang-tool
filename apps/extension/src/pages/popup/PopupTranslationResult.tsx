@@ -5,6 +5,10 @@ import {
   type AnkiAddState,
   type AnkiViewState,
 } from '../../components/AnkiActions';
+import {
+  PronunciationControl,
+  type PronunciationControlState,
+} from '../../components/PronunciationControl';
 import { SettingsAction } from '../../components/SettingsAction';
 
 interface PopupTranslationResultProps {
@@ -15,6 +19,13 @@ interface PopupTranslationResultProps {
   onAddToAnki: () => void;
   onViewInAnki: () => void;
   onOpenSettings: () => void;
+  pronunciationState?: PronunciationControlState | null;
+  pronunciationError?: string | null;
+  pronunciationApproxSizeBytes?: number;
+  onPlayPronunciation?: () => void;
+  onStopPronunciation?: () => void;
+  onRetryPronunciation?: () => void;
+  onInstallSpeechPack?: () => void;
 }
 
 export function PopupTranslationResult({
@@ -25,6 +36,13 @@ export function PopupTranslationResult({
   onAddToAnki,
   onViewInAnki,
   onOpenSettings,
+  pronunciationState = null,
+  pronunciationError,
+  pronunciationApproxSizeBytes,
+  onPlayPronunciation,
+  onStopPronunciation,
+  onRetryPronunciation,
+  onInstallSpeechPack,
 }: PopupTranslationResultProps) {
   return (
     <section className="bg-white p-4">
@@ -59,9 +77,22 @@ export function PopupTranslationResult({
       )}
 
       <div className="my-3 border-t border-slate-200" />
-      <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
-        Original
-      </p>
+      <div className="flex min-h-5 items-center justify-between gap-3">
+        <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
+          Original
+        </p>
+        {pronunciationState && (
+          <PronunciationControl
+            state={pronunciationState}
+            approxSizeBytes={pronunciationApproxSizeBytes}
+            errorMessage={pronunciationError}
+            onPlay={onPlayPronunciation}
+            onStop={onStopPronunciation}
+            onRetry={onRetryPronunciation}
+            onInstallSpeechPack={onInstallSpeechPack}
+          />
+        )}
+      </div>
       <p className="mt-1 text-xs leading-relaxed text-slate-600">{result.source_text}</p>
     </section>
   );

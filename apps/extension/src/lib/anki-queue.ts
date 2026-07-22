@@ -1,13 +1,35 @@
 import type { AnkiNote } from './anki';
+import type { PronunciationRequest } from './audio-tts-provider';
 
 const ANKI_QUEUE_STORAGE_KEY = 'ankiQueue.v1';
 const ANKI_QUEUE_TAG_PREFIX = 'llt_queue_';
+
+/**
+ * Audio sync status for a queued card.
+ * Legacy items created before audio support have no audio requirement.
+ */
+export type AnkiQueueAudioStatus =
+  | 'legacy_text_only'
+  | 'waiting_for_audio'
+  | 'ready_to_sync'
+  | 'sync_failed'
+  | 'audio_failed';
 
 export interface AnkiQueueItem {
   id: string;
   createdAt: number;
   note: AnkiNote;
   lastError?: string;
+  /** Present on all newly created items; absent/legacy for pre-audio queue entries. */
+  audioStatus?: AnkiQueueAudioStatus;
+  pronunciationRequest?: PronunciationRequest;
+  artifactKey?: string;
+}
+
+export interface AnkiQueueEnqueueOptions {
+  pronunciationRequest?: PronunciationRequest;
+  artifactKey?: string;
+  audioStatus?: AnkiQueueAudioStatus;
 }
 
 export interface AnkiQueueInfo {
@@ -49,17 +71,76 @@ function isAnkiNote(value: unknown): value is AnkiNote {
   );
 }
 
+function isPronunciationRequest(value: unknown): value is PronunciationRequest {
+  if (typeof value !== 'object' || value === null) return false;
+  const request = value as Partial<PronunciationRequest>;
+  return (
+    typeof request.text === 'string' &&
+    typeof request.language === 'string' &&
+    typeof request.providerId === 'string' &&
+    typeof request.providerRevision === 'string' &&
+    typeof request.voiceId === 'string' &&
+    typeof request.speed === 'number' &&
+    typeof request.encodingVersion === 'number'
+  );
+}
+
+const AUDIO_STATUSES: ReadonlySet<string> = new Set([
+  'legacy_text_only',
+  'waiting_for_audio',
+  'ready_to_sync',
+  'sync_failed',
+  'audio_failed',
+]);
+
 function parseQueue(value: unknown): AnkiQueueItem[] {
   if (!Array.isArray(value)) return [];
-  return value.filter((item): item is AnkiQueueItem => {
-    if (typeof item !== 'object' || item === null) return false;
+  return value.flatMap((item): AnkiQueueItem[] => {
+    if (typeof item !== 'object' || item === null) return [];
     const candidate = item as Partial<AnkiQueueItem>;
-    return (
-      typeof candidate.id === 'string' &&
-      typeof candidate.createdAt === 'number' &&
-      isAnkiNote(candidate.note) &&
-      (candidate.lastError === undefined || typeof candidate.lastError === 'string')
-    );
+    if (
+      typeof candidate.id !== 'string' ||
+      typeof candidate.createdAt !== 'number' ||
+      !isAnkiNote(candidate.note) ||
+      (candidate.lastError !== undefined && typeof candidate.lastError !== 'string')
+    ) {
+      return [];
+    }
+
+    // Pre-audio queue entries remain syncable as text-only.
+    if (candidate.audioStatus === undefined && candidate.pronunciationRequest === undefined) {
+      return [
+        {
+          id: candidate.id,
+          createdAt: candidate.createdAt,
+          note: candidate.note,
+          lastError: candidate.lastError,
+          audioStatus: 'legacy_text_only',
+        },
+      ];
+    }
+
+    if (
+      candidate.audioStatus === undefined ||
+      !AUDIO_STATUSES.has(candidate.audioStatus) ||
+      (candidate.artifactKey !== undefined && typeof candidate.artifactKey !== 'string') ||
+      (candidate.pronunciationRequest !== undefined &&
+        !isPronunciationRequest(candidate.pronunciationRequest))
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: candidate.id,
+        createdAt: candidate.createdAt,
+        note: candidate.note,
+        lastError: candidate.lastError,
+        audioStatus: candidate.audioStatus,
+        pronunciationRequest: candidate.pronunciationRequest,
+        artifactKey: candidate.artifactKey,
+      },
+    ];
   });
 }
 
@@ -72,6 +153,9 @@ function cloneItem(item: AnkiQueueItem): AnkiQueueItem {
       tags: [...item.note.tags],
       options: { ...item.note.options },
     },
+    pronunciationRequest: item.pronunciationRequest
+      ? { ...item.pronunciationRequest }
+      : undefined,
   };
 }
 
@@ -112,10 +196,11 @@ export class AnkiQueue {
     return this.exclusive(async () => parseQueue(await this.storage.read()).map(cloneItem));
   }
 
-  enqueue(note: AnkiNote): Promise<AnkiQueueItem> {
+  enqueue(note: AnkiNote, options: AnkiQueueEnqueueOptions = {}): Promise<AnkiQueueItem> {
     return this.exclusive(async () => {
       const items = parseQueue(await this.storage.read());
       const id = this.createId();
+      const requiresAudio = options.pronunciationRequest !== undefined;
       const item: AnkiQueueItem = {
         id,
         createdAt: this.now(),
@@ -125,6 +210,15 @@ export class AnkiQueue {
           tags: [...note.tags, getAnkiQueueTag(id)],
           options: { ...note.options },
         },
+        audioStatus:
+          options.audioStatus ??
+          (requiresAudio
+            ? options.artifactKey
+              ? 'ready_to_sync'
+              : 'waiting_for_audio'
+            : 'legacy_text_only'),
+        pronunciationRequest: options.pronunciationRequest,
+        artifactKey: options.artifactKey,
       };
       await this.storage.write([...items, item]);
       return cloneItem(item);
@@ -142,13 +236,59 @@ export class AnkiQueue {
     return this.exclusive(async () => {
       const items = parseQueue(await this.storage.read());
       await this.storage.write(
-        items.map(item => (item.id === id ? { ...item, lastError: error } : item)),
+        items.map(item =>
+          item.id === id
+            ? {
+                ...item,
+                lastError: error,
+                audioStatus:
+                  item.audioStatus === 'waiting_for_audio' || item.audioStatus === 'ready_to_sync'
+                    ? 'sync_failed'
+                    : item.audioStatus,
+              }
+            : item,
+        ),
       );
     });
   }
 
-  clear(): Promise<void> {
-    return this.exclusive(() => this.storage.write([]));
+  setAudioFailed(id: string, error: string): Promise<void> {
+    return this.exclusive(async () => {
+      const items = parseQueue(await this.storage.read());
+      await this.storage.write(
+        items.map(item =>
+          item.id === id
+            ? { ...item, lastError: error, audioStatus: 'audio_failed' as const }
+            : item,
+        ),
+      );
+    });
+  }
+
+  setAudioReady(id: string, artifactKey: string): Promise<void> {
+    return this.exclusive(async () => {
+      const items = parseQueue(await this.storage.read());
+      await this.storage.write(
+        items.map(item =>
+          item.id === id
+            ? {
+                ...item,
+                artifactKey,
+                audioStatus: 'ready_to_sync' as const,
+                lastError: undefined,
+              }
+            : item,
+        ),
+      );
+    });
+  }
+
+  clear(): Promise<AnkiQueueItem[]> {
+    return this.exclusive(async () => {
+      const items = parseQueue(await this.storage.read());
+      await this.storage.write([]);
+      return items.map(cloneItem);
+    });
   }
 
   async getInfo(): Promise<AnkiQueueInfo> {

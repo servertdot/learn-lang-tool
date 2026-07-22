@@ -49,6 +49,7 @@ const ANKI_FIELD_VALUE_OPTIONS: { value: AnkiFieldValue; label: string }[] = [
   { value: 'textFrom', label: 'Text from' },
   { value: 'textTo', label: 'Text to' },
   { value: 'sentence', label: 'Sentence' },
+  { value: 'audio', label: 'Audio' },
 ];
 
 export default function Options() {
@@ -522,6 +523,11 @@ export default function Options() {
                 Export CSV
               </button>
             </div>
+
+            <p className="mt-3 text-xs leading-relaxed text-amber-900/80">
+              Manual TSV/CSV export is text-only and does not include generated pronunciation
+              media.
+            </p>
 
             {ankiQueueInfo.count > 0 && (
               <button
