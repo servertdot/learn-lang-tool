@@ -15,10 +15,22 @@ type KokoroInstance = Awaited<ReturnType<KokoroModule['KokoroTTS']['from_pretrai
 
 let kokoroPromise: Promise<KokoroInstance> | null = null;
 
+/**
+ * Point ONNX Runtime at extension-packaged WASM.
+ * Transformers.js defaults to jsdelivr, which MV3 CSP blocks.
+ */
+export function configureKokoroOrtWasmPaths(
+  env: { wasmPaths: unknown },
+  getUrl: (path: string) => string = path => chrome.runtime.getURL(path),
+): void {
+  env.wasmPaths = getUrl('ort/');
+}
+
 async function loadKokoro(): Promise<KokoroInstance> {
   if (!kokoroPromise) {
     kokoroPromise = (async () => {
-      const { KokoroTTS } = await import('kokoro-js');
+      const { KokoroTTS, env } = await import('kokoro-js');
+      configureKokoroOrtWasmPaths(env);
       return KokoroTTS.from_pretrained(KOKORO_MODEL_ID, {
         dtype: 'q8',
         device: 'wasm',

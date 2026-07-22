@@ -58,6 +58,10 @@ next-env.d.ts
 apps/extension/public/bergamot/*
 !apps/extension/public/bergamot/.gitkeep
 
+# generated ONNX Runtime WASM for Kokoro (copied on postinstall)
+apps/extension/public/ort/*
+!apps/extension/public/ort/.gitkeep
+
 # scripts/
 # .dependency-cruiser.cjs
 # .dependency-cruiser-detailed.cjs

@@ -32,6 +32,9 @@ importers:
       '@browsermt/bergamot-translator':
         specifier: 0.4.9
         version: 0.4.9
+      '@huggingface/transformers':
+        specifier: 3.8.1
+        version: 3.8.1
       '@package/shared':
         specifier: workspace:^
         version: link:../../packages/shared
@@ -4866,7 +4869,7 @@ snapshots:
       es6-error: 4.1.1
       matcher: 3.0.0
       roarr: 2.15.4
-      semver: 7.6.2
+      semver: 7.8.5
       serialize-error: 7.0.1
 
   globals@14.0.0: {}

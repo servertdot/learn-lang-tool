@@ -1,0 +1,2 @@
+# Packaged ONNX Runtime WASM for Kokoro / Transformers.js (MV3-safe).
+# Populated by scripts/copy-ort-assets.mjs on postinstall.

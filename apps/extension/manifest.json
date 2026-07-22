@@ -30,7 +30,9 @@
     "http://127.0.0.1/*",
     "http://localhost/*",
     "https://storage.googleapis.com/*",
-    "https://translate.google.com/*"
+    "https://translate.google.com/*",
+    "https://huggingface.co/*",
+    "https://*.huggingface.co/*"
   ],
   "content_scripts": [
     {
@@ -57,7 +59,8 @@
         "contentStyle.css",
         "icon-128.png",
         "icon-32.png",
-        "bergamot/*"
+        "bergamot/*",
+        "ort/*"
       ],
       "matches": [
         "<all_urls>"

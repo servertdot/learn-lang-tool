@@ -17,11 +17,12 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
-    "postinstall": "node scripts/copy-bergamot-assets.mjs"
+    "postinstall": "node scripts/copy-bergamot-assets.mjs && node scripts/copy-ort-assets.mjs"
   },
   "type": "module",
   "dependencies": {
     "@browsermt/bergamot-translator": "0.4.9",
+    "@huggingface/transformers": "3.8.1",
     "@package/shared": "workspace:^",
     "kokoro-js": "^1.2.1",
     "react": "^19.1.0",
