@@ -1,0 +1,17 @@
+# Changelog
+
+All notable changes to Learn Lang Tool are documented in this file.
+
+## 1.0.0 - 2026-07-26
+
+First release of the browser extension.
+
+### Highlights
+
+- Translate selected text and words directly on a page with a translation popover.
+- Use Google Translate by default or install the Bergamot `en → ru` model pack for offline translation.
+- Save translation results to a local Anki queue and synchronize them through AnkiConnect.
+- Export queued cards as TSV or CSV for manual import.
+- Generate English pronunciation locally with Kokoro and attach audio to Anki cards.
+- Handle selections from regular web pages, Google Docs, YouTube subtitles, and the built-in PDF viewer.
+- Configure the language pair, translation provider, hotkey, Anki connection, and pronunciation settings.

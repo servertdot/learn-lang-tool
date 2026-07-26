@@ -36,7 +36,7 @@ describe('installSpeechModelPackFiles', () => {
 
   it('downloads missing pinned files into the speech model cache', async () => {
     const store = mockCaches();
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = vi.fn(async () => {
       return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
     });
     vi.stubGlobal('fetch', fetchMock);

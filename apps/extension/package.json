@@ -1,6 +1,6 @@
 {
   "name": "@app/extension",
-  "version": "1.4.0",
+  "version": "1.0.0",
   "description": "A simple chrome & firefox extension template with Vite, React, TypeScript and Tailwind CSS.",
   "license": "MIT",
   "repository": {
@@ -32,6 +32,7 @@
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.3",
+    "@eslint/js": "9.32.0",
     "@tailwindcss/vite": "^4.1.11",
     "@types/chrome": "^0.1.11",
     "@types/node": "^24.9.1",
@@ -48,6 +49,7 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^5.2.0",
     "fs-extra": "^11.3.2",
+    "globals": "14.0.0",
     "happy-dom": "^20.11.0",
     "nodemon": "^3.1.10",
     "tailwindcss": "^4.1.16",
