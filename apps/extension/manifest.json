@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Learn Lang Tool",
+  "short_name": "LLT",
   "description": "In-context translation popover for language learners.",
   "options_ui": {
     "page": "src/pages/options/index.html"

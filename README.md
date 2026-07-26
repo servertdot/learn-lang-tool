@@ -1,46 +1,31 @@
-# Learn Lang Tool
+# Learn Lang Tool (LLT)
 
-Браузерное расширение для изучения английского: выделяешь текст на странице, получаешь перевод и при необходимости сохраняешь фразу в Anki как карточку.
+LLT is a browser extension for learning languages in context. Select a word, phrase, or sentence on any page to translate it instantly, then save it to Anki without leaving what you are reading.
 
-Цель — учить не только отдельные слова, а целые словосочетания и фразы в том контексте, где ты их встретил.
+The goal is to help you learn expressions in the context where you found them—not as isolated dictionary entries.
 
-## Зачем это нужно
+## Features
 
-Типичный словарь или flashcard-приложение заставляет вырывать слова из контекста. Здесь поток другой: читаешь что угодно в браузере → выделяешь интересный кусок → сразу видишь перевод → при желании отправляешь в Anki.
+- Translate selected text directly on the page.
+- Translate the word under the cursor with a hold-to-translate hotkey.
+- Use Google Translate by default for translation quality.
+- Switch to local Bergamot translation for a private, offline `en → ru` workflow.
+- Save the original text, translation, and context sentence to a local Anki queue.
+- Synchronize queued cards through AnkiConnect or export them as TSV/CSV.
+- Generate English pronunciation locally with Kokoro and attach it to Anki cards.
+- Capture text from regular web pages, Google Docs, YouTube subtitles, and the built-in PDF viewer.
+- Configure the language pair, translation provider, hotkey, Anki connection, and pronunciation settings.
 
-Так проще запоминать устойчивые выражения, коллокации и целые предложения, а не только изолированные леммы.
+## How LLT works
 
-## Связь с Yomitan
+1. Select text on a page, or hold the configured hotkey over a word.
+2. LLT displays a translation popover next to the selection.
+3. The background provider router sends the translation request to the selected provider.
+4. Google Translate is used by default. In offline mode, Bergamot runs locally inside the extension.
+5. **Add to Anki** stores the translation result in a local queue.
+6. If Anki and AnkiConnect are available, LLT synchronizes the card immediately. Otherwise, it retries in the background.
 
-Проект в каком-то смысле — альтернатива [Yomitan](https://github.com/yomidevs/yomitan) ([документация](https://yomitan.wiki/)).
-
-Yomitan — мощное расширение для language learning: popup-словари, частоты, аудио, экспорт в Anki. Оно опирается на загруженные словари и отлично работает для поиска слов.
-
-Мы хотим похожий UX «перевод прямо на странице + сохранение в Anki», но с акцентом на **перевод фраз и словосочетаний**. По умолчанию расширение обращается напрямую к Google Translate ради качества; в Options можно выбрать полностью локальный Bergamot (Marian WASM).
-
-| | Yomitan | Learn Lang Tool |
-|---|---|---|
-| Источник смысла | Локальные словари | Google Translate или локальный Bergamot для фраз |
-| Сильная сторона | Lookup слова, богатые словарные данные | Перевод словосочетаний и предложений |
-| Anki | Зрелая интеграция | Добавление карточки через AnkiConnect |
-| Инфра для пользователя | Не нужна | Свой сервер не нужен; AnkiConnect нужен только для автоматической синхронизации карточек |
-
-## Как это работает (product path)
-
-1. На странице выделяешь текст или держишь hotkey над словом.
-2. Content script показывает **translation popover**.
-3. Запрос уходит в **translation facade** → background, где выбирается сохранённый provider.
-4. По умолчанию текст отправляется напрямую на фиксированный `https://translate.google.com` через минимальный адаптер без npm-зависимостей.
-5. Для приватного режима можно выбрать Bergamot и скачать model pack языковой пары (v1: `en → ru`); тогда перевод работает offline и выделенный текст не покидает устройство.
-6. Кнопка **Add to Anki** сначала сохраняет исходный текст, перевод и контекстное предложение в локальную очередь расширения. Если Anki с AnkiConnect запущена, карточка сразу синхронизируется; иначе расширение повторяет попытки в фоне. После синхронизации **View in Anki** открывает созданную заметку в Browse.
-
-Особые источники текста:
-
-- **Google Docs:** скрытый accessibility-фрейм читает canvas-выделение и передаёт его в верхний документ, где отображается видимый popover; clipboard fallback восстанавливает пользовательский буфер.
-- **YouTube:** если обычного выделения нет, hotkey переводит текущую строку включённых субтитров.
-- **PDF во встроенном просмотрщике:** выдели текст и выбери **Translate selection** в контекстном меню; перевод откроется в popup расширения.
-
-```
+```text
 ┌─────────────────┐     ┌──────────────────┐     ┌────────────────────┐
 │  Extension UI   │────▶│  Background      │────▶│  Google Translate  │
 │  (popover)      │     │  provider router │     └────────────────────┘
@@ -48,60 +33,127 @@ Yomitan — мощное расширение для language learning: popup-с
 └─────────────────┘     └──────────────────┘
 ```
 
-`apps/api` + `apps/translator` остаются в монорепе как **optional translation backend** для разработки/экспериментов и **не нужны** для happy path расширения.
+Google Translate receives the selected text when it is the active provider. With Bergamot, the model pack is downloaded with explicit consent and translation then works offline without sending selections to a translation service.
 
-## Монорепа
+### Special text sources
 
-```
-learn-lang-tool/
-├── apps/
-│   ├── extension/   # Chrome MV3 расширение (React + Vite + Tailwind + Bergamot)
-│   ├── api/         # Optional Fastify BFF (не обязателен для product path)
-│   └── translator/  # Optional FastAPI + Argos (не обязателен для product path)
-└── packages/
-    └── shared/      # TranslateRequest/Response, language pair defaults, limits
-```
+- **Google Docs:** an accessibility frame reads canvas selections and forwards them to the visible translation popover. The clipboard fallback restores the user's clipboard.
+- **YouTube:** when there is no regular selection, the hotkey translates the current visible subtitle line.
+- **Built-in PDF viewer:** select text and choose **Translate selection** from the context menu; the result opens in the extension popup.
 
-## Локальный запуск (расширение)
+## LLT and Yomitan
+
+LLT is inspired by [Yomitan](https://github.com/yomidevs/yomitan), a mature language-learning extension with local dictionaries, frequency data, audio, and Anki export.
+
+The main difference is focus: Yomitan excels at dictionary lookups, while LLT is designed around translating phrases and sentences as they appear on a page.
+
+| | Yomitan | LLT |
+|---|---|---|
+| Translation source | Local dictionaries | Google Translate or local Bergamot |
+| Primary strength | Rich word lookup | Phrases, collocations, and sentences |
+| Anki workflow | Mature integration | Local queue and AnkiConnect synchronization |
+| Required infrastructure | None | No server; AnkiConnect is only needed for automatic synchronization |
+
+## Install a release
+
+Download the latest build from [GitHub Releases](https://github.com/servertdot/learn-lang-tool/releases/latest).
+
+### Chrome
+
+1. Download and extract `learn-lang-tool-*-chrome.zip`.
+2. Open `chrome://extensions`.
+3. Enable **Developer mode**.
+4. Select **Load unpacked** and choose the extracted directory.
+
+### Firefox
+
+1. Download and extract `learn-lang-tool-*-firefox.zip`.
+2. Open `about:debugging#/runtime/this-firefox`.
+3. Select **Load Temporary Add-on**.
+4. Choose `manifest.json` from the extracted directory.
+
+The Firefox package is currently a development build and must be loaded again after restarting the browser.
+
+## Anki setup
+
+For automatic synchronization:
+
+1. Install the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on.
+2. Create an `English` deck.
+3. Use the `Basic (and reversed card)` note type with these fields:
+   - `Word`
+   - `Reading`
+   - `Sentence`
+   - `Meaning`
+4. Start Anki and approve LLT when AnkiConnect requests access.
+
+LLT connects to `http://127.0.0.1:8765` by default and adds the `yomitan` tag. Anki does not need to stay open: cards remain in the local queue and synchronize when it becomes available.
+
+You can also export the queue as TSV/CSV and import it manually. After importing, remove those cards from the queue to prevent duplicate synchronization. AnkiConnect is not required when using export only.
+
+## Local development
+
+Requirements:
+
+- Node.js
+- pnpm 10.4.1
+
+Install dependencies and start the Chrome development build:
 
 ```bash
 pnpm install
 pnpm --filter @app/extension dev
 ```
 
-Загрузи unpacked-сборку Chrome из выходной директории Vite (`dist_chrome`). Google выбран по умолчанию. Для offline-режима выбери Bergamot в Options и скачай model pack `en→ru` (~15 MB). Оба режима работают без `api`/`translator`.
+Load the unpacked extension from `apps/extension/dist_chrome`.
 
-Для автоматической синхронизации карточек установи AnkiConnect и подготовь колоду `English` с типом заметки `Basic (and reversed card)` и полями `Word`, `Reading`, `Sentence`, `Meaning`. По умолчанию расширение подключается к `http://127.0.0.1:8765` и добавляет тег `yomitan`. При первом подключении AnkiConnect попросит разрешить доступ расширению.
+Google Translate is selected by default. To use offline translation, open LLT settings, select Bergamot, and download the `en → ru` model pack (approximately 15 MB).
 
-Anki необязательно держать открытой: карточки сохраняются в локальной очереди браузера и отправляются, когда Anki станет доступна. В Options очередь можно синхронизировать вручную или экспортировать в готовый для импорта Anki файл TSV/CSV. После ручного импорта очисти экспортированные карточки из очереди, чтобы они не были отправлены повторно при следующей автоматической синхронизации. Если используется только TSV/CSV-экспорт, AnkiConnect не требуется.
-
-Тесты / проверка типов:
+### Verification
 
 ```bash
 pnpm --filter @app/extension test
 pnpm --filter @app/extension typecheck
 pnpm --filter @app/extension lint
+pnpm --filter @app/extension build:chrome
+pnpm --filter @app/extension build:firefox
 ```
 
-### Optional backend (необязательно)
+## Repository structure
+
+```text
+learn-lang-tool/
+├── apps/
+│   ├── extension/   # LLT browser extension
+│   ├── api/         # Optional Fastify translation backend
+│   └── translator/  # Optional FastAPI + Argos translation service
+└── packages/
+    └── shared/      # Shared translation contracts and defaults
+```
+
+`apps/api` and `apps/translator` are optional development and experimentation tools. They are not required for the extension's normal product path.
+
+Run the optional backend:
 
 ```bash
 pnpm --filter @app/translator models:install
-pnpm --filter @app/translator dev   # :8000
-pnpm --filter @app/api dev          # :3000
+pnpm --filter @app/translator dev   # http://localhost:8000
+pnpm --filter @app/api dev          # http://localhost:3000
 ```
 
-HTTP-адаптер в коде сохранён, но текущий product router предлагает Google и Bergamot.
+## Technology
 
-## Стек
-
-- **Extension:** React 19, TypeScript, Vite, Tailwind CSS, Manifest V3, Bergamot WASM
+- **Extension:** React 19, TypeScript, Vite, Tailwind CSS, Manifest V3
+- **Translation:** Google Translate, Bergamot WASM
+- **Pronunciation:** Kokoro, ONNX Runtime Web
+- **Anki:** AnkiConnect, TSV/CSV export
 - **Optional API:** Fastify, TypeScript
-- **Optional Translator:** FastAPI, Argos Translate, Poetry
-- **Монорепа:** pnpm workspaces
+- **Optional translator:** FastAPI, Argos Translate, Poetry
+- **Monorepo:** pnpm workspaces
 
-## Документы
+## Project documentation
 
-- [`CONTEXT.md`](CONTEXT.md) — доменный глоссарий
-- [`docs/adr/0001-bergamot-as-translation-engine.md`](docs/adr/0001-bergamot-as-translation-engine.md) — исходное local-first решение
-- [`docs/adr/0002-google-quality-provider.md`](docs/adr/0002-google-quality-provider.md) — Google по умолчанию и Bergamot как offline-режим
+- [`CONTEXT.md`](CONTEXT.md) — domain glossary
+- [`docs/adr/0001-bergamot-as-translation-engine.md`](docs/adr/0001-bergamot-as-translation-engine.md) — original local-first translation decision
+- [`docs/adr/0002-google-quality-provider.md`](docs/adr/0002-google-quality-provider.md) — Google as the default provider and Bergamot as the offline option
+- [`CHANGELOG.md`](CHANGELOG.md) — release history
