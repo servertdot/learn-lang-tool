@@ -2,6 +2,14 @@
 
 All notable changes to Learn Lang Tool are documented in this file.
 
+## 1.0.1 - 2026-07-31
+
+### Improvements
+
+- Open extension settings in a dedicated browser tab with a new responsive visual design.
+- Compare queued Anki cards with existing notes and decide whether to skip or add duplicates.
+- Keep offline queue state and synchronization feedback clearer when Anki is unavailable.
+
 ## 1.0.0 - 2026-07-26
 
 First release of the browser extension.

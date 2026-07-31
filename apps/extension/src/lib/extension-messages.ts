@@ -6,6 +6,7 @@ import type { TranslationFacadeErrorCode } from './translation-facade';
 import type { AnkiCardContent } from './anki';
 import type { AnkiExportFormat } from './anki-export';
 import type { PageTextSourceKind } from './page-text-source';
+import type { AnkiDuplicateConflict } from './anki-queue-sync';
 
 export type AnkiAddNoteResponse =
   | { ok: true; status: 'synced'; noteId: number; queuedCount: number }
@@ -33,8 +34,14 @@ export type AnkiQueueSyncResponse =
       count: number;
       failedCount: number;
       lastError?: string;
+      duplicateConflicts: AnkiDuplicateConflict[];
     }
   | { ok: false; error: string };
+
+export type AnkiDuplicateDecision = {
+  queueItemId: string;
+  action: 'add' | 'skip';
+};
 
 export type AnkiQueueExportResponse =
   | { ok: true; content: string; filename: string; mimeType: string }
@@ -124,6 +131,7 @@ export type LltMessage =
   | { type: 'llt.anki.getModelFieldNames'; modelName: string }
   | { type: 'llt.anki.queue.getInfo' }
   | { type: 'llt.anki.queue.sync' }
+  | { type: 'llt.anki.queue.resolveDuplicates'; decisions: AnkiDuplicateDecision[] }
   | { type: 'llt.anki.queue.export'; format: AnkiExportFormat }
   | { type: 'llt.anki.queue.clear' }
   | { type: 'llt.openOptionsPage' }

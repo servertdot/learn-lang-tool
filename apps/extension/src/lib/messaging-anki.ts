@@ -10,8 +10,10 @@ import type {
   AnkiQueueInfoResponse,
   AnkiQueueSyncResponse,
   AnkiViewNoteResponse,
+  AnkiDuplicateDecision,
   LltMessage,
 } from './extension-messages';
+import type { AnkiDuplicateConflict } from './anki-queue-sync';
 
 export interface AnkiCollectionInfo {
   deckNames: string[];
@@ -73,7 +75,7 @@ export async function requestAnkiQueueInfo(): Promise<AnkiQueueInfo> {
 }
 
 export async function requestAnkiQueueSync(): Promise<
-  AnkiQueueInfo & { syncedCount: number }
+  AnkiQueueInfo & { syncedCount: number; duplicateConflicts: AnkiDuplicateConflict[] }
 > {
   const message: LltMessage = { type: 'llt.anki.queue.sync' };
   const response = (await chrome.runtime.sendMessage(message)) as AnkiQueueSyncResponse;
@@ -83,6 +85,24 @@ export async function requestAnkiQueueSync(): Promise<
     count: response.count,
     failedCount: response.failedCount,
     lastError: response.lastError,
+    duplicateConflicts: response.duplicateConflicts,
+  };
+}
+
+export async function requestResolveAnkiDuplicates(
+  decisions: AnkiDuplicateDecision[],
+): Promise<
+  AnkiQueueInfo & { syncedCount: number; duplicateConflicts: AnkiDuplicateConflict[] }
+> {
+  const message: LltMessage = { type: 'llt.anki.queue.resolveDuplicates', decisions };
+  const response = (await chrome.runtime.sendMessage(message)) as AnkiQueueSyncResponse;
+  if (!response.ok) throw new Error(response.error);
+  return {
+    syncedCount: response.syncedCount,
+    count: response.count,
+    failedCount: response.failedCount,
+    lastError: response.lastError,
+    duplicateConflicts: response.duplicateConflicts,
   };
 }
 

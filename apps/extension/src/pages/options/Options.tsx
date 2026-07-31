@@ -22,8 +22,12 @@ import {
   requestAnkiQueueExport,
   requestAnkiQueueInfo,
   requestAnkiQueueSync,
+  requestResolveAnkiDuplicates,
 } from '@src/lib/messaging-anki';
 import type { AnkiQueueInfo } from '@src/lib/anki-queue';
+import type { AnkiDuplicateConflict } from '@src/lib/anki-queue-sync';
+import type { AnkiDuplicateDecision } from '@src/lib/extension-messages';
+import { AnkiDuplicateDialog } from '@src/components/AnkiDuplicateDialog';
 import type { LanguagePair, TranslationProvider } from '@package/shared';
 import {
   DEFAULT_LANGUAGE_PAIR,
@@ -73,6 +77,10 @@ export default function Options() {
   });
   const [ankiQueueBusy, setAnkiQueueBusy] = useState(false);
   const [ankiQueueNotice, setAnkiQueueNotice] = useState<string>();
+  const [duplicateConflicts, setDuplicateConflicts] = useState<AnkiDuplicateConflict[]>([]);
+  const [duplicateDecisions, setDuplicateDecisions] = useState<
+    Record<string, AnkiDuplicateDecision['action'] | undefined>
+  >({});
   const ankiRequestVersion = useRef(0);
 
   const pack = getModelPackForLanguagePair(pair);
@@ -265,13 +273,50 @@ export default function Options() {
     try {
       const result = await requestAnkiQueueSync();
       setAnkiQueueInfo(result);
-      setAnkiQueueNotice(
-        result.count === 0
-          ? `Synced ${result.syncedCount} card${result.syncedCount === 1 ? '' : 's'} to Anki.`
-          : 'Anki is still unavailable. Your cards remain saved locally.',
-      );
+      if (result.duplicateConflicts.length > 0) {
+        setDuplicateConflicts(result.duplicateConflicts);
+        setDuplicateDecisions({});
+        setAnkiQueueNotice(
+          `Synced ${result.syncedCount} card${result.syncedCount === 1 ? '' : 's'}. ` +
+            `${result.duplicateConflicts.length} duplicate${result.duplicateConflicts.length === 1 ? '' : 's'} need your decision.`,
+        );
+      } else {
+        setAnkiQueueNotice(
+          result.count === 0
+            ? `Synced ${result.syncedCount} card${result.syncedCount === 1 ? '' : 's'} to Anki.`
+            : 'Sync finished. Cards that could not be synced remain saved locally.',
+        );
+      }
     } catch (error) {
       setAnkiQueueNotice(error instanceof Error ? error.message : 'Could not sync the Anki queue.');
+    } finally {
+      setAnkiQueueBusy(false);
+    }
+  }
+
+  async function handleDuplicateDecisions() {
+    const decisions = duplicateConflicts.flatMap((conflict): AnkiDuplicateDecision[] => {
+      const action = duplicateDecisions[conflict.queueItemId];
+      return action ? [{ queueItemId: conflict.queueItemId, action }] : [];
+    });
+    if (decisions.length !== duplicateConflicts.length) return;
+
+    setAnkiQueueBusy(true);
+    setAnkiQueueNotice(undefined);
+    try {
+      const result = await requestResolveAnkiDuplicates(decisions);
+      setAnkiQueueInfo(result);
+      setDuplicateConflicts(result.duplicateConflicts);
+      setDuplicateDecisions({});
+      setAnkiQueueNotice(
+        result.duplicateConflicts.length > 0
+          ? `${result.duplicateConflicts.length} more duplicate${result.duplicateConflicts.length === 1 ? '' : 's'} need your decision.`
+          : 'Duplicate decisions applied. The rest of the queue was synchronized.',
+      );
+    } catch (error) {
+      setAnkiQueueNotice(
+        error instanceof Error ? error.message : 'Could not apply duplicate decisions.',
+      );
     } finally {
       setAnkiQueueBusy(false);
     }
@@ -320,189 +365,206 @@ export default function Options() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-start justify-center py-16 px-4">
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 w-full max-w-2xl p-8">
-        <h1 className="text-xl font-semibold text-gray-900 mb-6">Translation Settings</h1>
+    <div className="options-page">
+      <aside className="options-hero">
+        <div className="options-grain" aria-hidden="true" />
+        <div className="hero-header">
+          <a className="brand" href="#top" aria-label="Learn Lang settings home">
+            <span className="brand-mark" aria-hidden="true">L</span>
+            <span>Learn Lang</span>
+          </a>
+          <span className="hero-badge">Extension</span>
+        </div>
 
-        <form onSubmit={handleSave} className="space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Translation provider
-            </label>
-            <select
-              value={provider}
-              onChange={e => setProvider(e.target.value as TranslationProvider)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="google">Google Translate — better quality</option>
-              <option value="bergamot">Bergamot — private and offline</option>
-            </select>
-            <p className="mt-2 text-xs text-gray-500 leading-relaxed">
-              {provider === 'google'
-                ? 'Selected text is sent directly to translate.google.com. This is an unofficial endpoint and may be rate-limited or changed by Google.'
-                : 'Selected text stays on this device. An offline model pack is required and translation quality may be lower.'}
-            </p>
-          </div>
+        <div className="hero-copy">
+          <p className="eyebrow eyebrow-light">Settings / 01</p>
+          <h1>Make every page part of your <em>language practice.</em></h1>
+          <p className="hero-description">
+            Tune the way Learn Lang translates, responds, and turns useful phrases into cards.
+          </p>
+          <nav className="hero-nav" aria-label="Settings sections">
+            <a href="#translation"><span>01</span> Translation</a>
+            <a href="#anki"><span>02</span> Anki cards</a>
+          </nav>
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Source language code
-            </label>
-            <input
-              type="text"
-              value={pair.from_code}
-              onChange={e => setPair(p => ({ ...p, from_code: e.target.value.toLowerCase() }))}
-              placeholder="e.g. en"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+        <div className="hero-landscape" aria-hidden="true">
+          <div className="sun" />
+          <div className="mountain mountain-back" />
+          <div className="mountain mountain-front" />
+          <div className="hill" />
+        </div>
+      </aside>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Target language code
-            </label>
-            <input
-              type="text"
-              value={pair.to_code}
-              onChange={e => setPair(p => ({ ...p, to_code: e.target.value.toLowerCase() }))}
-              placeholder="e.g. ru"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+      <main id="top" className="options-content">
+        <header className="content-intro">
+          <p className="eyebrow">Personal workspace</p>
+          <h2>Settings that feel like yours.</h2>
+          <p>Changes stay with your browser profile and follow you through extension sync.</p>
+        </header>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Hotkey (modifier key to hold)
-            </label>
-            <select
-              value={hotkey}
-              onChange={e => setHotkeyState(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {MODIFIER_KEYS.map(k => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            type="submit"
-            className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
-            {saved ? '✓ Saved' : 'Save settings'}
-          </button>
-        </form>
-
-        {provider === 'bergamot' && (
-          <div className="mt-8 border-t border-gray-100 pt-6">
-            <h2 className="text-sm font-semibold text-gray-900">Model pack</h2>
-            {pack ? (
-              <>
-                <p className="mt-2 text-xs text-gray-500 leading-relaxed">
-                  Download the on-device translation model for {pack.from_code}→{pack.to_code} (
-                  {formatApproxSize(pack.approxSizeBytes)}). After install, translation works offline.
-                  Your page selections are never uploaded.
-                </p>
-                <p className="mt-2 text-xs font-medium text-gray-700">
-                  Status: <span className="uppercase tracking-wide">{packStatus}</span>
-                </p>
-                {packError && <p className="mt-1 text-xs text-rose-600">{packError}</p>}
-                <div className="mt-3 flex gap-2">
-                  {(packStatus === 'missing' || packStatus === 'failed') && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={handleInstall}
-                      className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-600 disabled:opacity-50"
-                    >
-                      {packStatus === 'failed' ? 'Retry download' : 'Download model pack'}
-                    </button>
-                  )}
-                  {packStatus === 'downloading' && (
-                    <button
-                      type="button"
-                      onClick={handleCancel}
-                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700"
-                    >
-                      Cancel download
-                    </button>
-                  )}
-                  {packStatus === 'ready' && (
-                    <p className="text-xs text-emerald-700">Ready for offline translation.</p>
-                  )}
-                </div>
-              </>
-            ) : (
-              <p className="mt-2 text-xs text-gray-500">
-                No model pack for this language pair yet. v1 supports en→ru.
-              </p>
-            )}
-          </div>
-        )}
-
-        <section className="mt-8 border-t border-gray-200 pt-8">
-          <div className="flex items-start justify-between gap-4">
+        <section id="translation" className="settings-card">
+          <div className="section-heading">
+            <span className="section-number">01</span>
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">Anki cards</h2>
-              <p className="mt-1 text-sm leading-relaxed text-gray-500">
-                Choose where cards are created and what each Anki field receives.
+              <h2>Translation</h2>
+              <p>Choose how a selection is translated and which key brings it to life.</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSave} className="settings-form">
+            <div className="form-field form-field-wide">
+              <label htmlFor="translation-provider">Translation provider</label>
+              <select
+                id="translation-provider"
+                value={provider}
+                onChange={e => setProvider(e.target.value as TranslationProvider)}
+              >
+                <option value="google">Google Translate — better quality</option>
+                <option value="bergamot">Bergamot — private and offline</option>
+              </select>
+              <p className="field-note">
+                {provider === 'google'
+                  ? 'Selected text is sent directly to translate.google.com. This is an unofficial endpoint and may be rate-limited or changed by Google.'
+                  : 'Selected text stays on this device. An offline model pack is required and translation quality may be lower.'}
               </p>
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="source-language">Source language</label>
+              <div className="language-input">
+                <input
+                  id="source-language"
+                  type="text"
+                  value={pair.from_code}
+                  onChange={e => setPair(p => ({ ...p, from_code: e.target.value.toLowerCase() }))}
+                  placeholder="e.g. en"
+                  maxLength={8}
+                />
+                <span>FROM</span>
+              </div>
+            </div>
+
+            <div className="form-field">
+              <label htmlFor="target-language">Target language</label>
+              <div className="language-input">
+                <input
+                  id="target-language"
+                  type="text"
+                  value={pair.to_code}
+                  onChange={e => setPair(p => ({ ...p, to_code: e.target.value.toLowerCase() }))}
+                  placeholder="e.g. ru"
+                  maxLength={8}
+                />
+                <span>TO</span>
+              </div>
+            </div>
+
+            <div className="form-field form-field-wide">
+              <label htmlFor="translation-hotkey">Hold-to-translate key</label>
+              <select
+                id="translation-hotkey"
+                value={hotkey}
+                onChange={e => setHotkeyState(e.target.value)}
+              >
+                {MODIFIER_KEYS.map(key => (
+                  <option key={key} value={key}>{key}</option>
+                ))}
+              </select>
+              <p className="field-note">Hold this modifier while selecting or pointing at a word.</p>
+            </div>
+
+            <div className="form-action form-field-wide">
+              <button type="submit" className="button button-primary">
+                {saved ? 'Saved ✓' : 'Save translation settings'}
+              </button>
+              <span aria-live="polite">{saved ? 'Your preferences are up to date.' : 'Stored securely in extension sync.'}</span>
+            </div>
+          </form>
+
+          {provider === 'bergamot' && (
+            <div className="model-panel">
+              <div className="model-panel-heading">
+                <div>
+                  <p className="mini-label">Offline translation</p>
+                  <h3>Model pack</h3>
+                </div>
+                <span className={`status-pill status-${packStatus}`}>{packStatus}</span>
+              </div>
+              {pack ? (
+                <>
+                  <p>
+                    Download the on-device model for {pack.from_code} → {pack.to_code} (
+                    {formatApproxSize(pack.approxSizeBytes)}). After installation, translation works
+                    offline and page selections never leave your device.
+                  </p>
+                  {packError && <p className="error-message">{packError}</p>}
+                  <div className="inline-actions">
+                    {(packStatus === 'missing' || packStatus === 'failed') && (
+                      <button type="button" disabled={busy} onClick={handleInstall} className="button button-dark">
+                        {packStatus === 'failed' ? 'Retry download' : 'Download model pack'}
+                      </button>
+                    )}
+                    {packStatus === 'downloading' && (
+                      <button type="button" onClick={handleCancel} className="button button-secondary">
+                        Cancel download
+                      </button>
+                    )}
+                    {packStatus === 'ready' && <p className="success-message">Ready for offline translation.</p>}
+                  </div>
+                </>
+              ) : (
+                <p>No model pack for this language pair yet. v1 supports en → ru.</p>
+              )}
+            </div>
+          )}
+        </section>
+
+        <section id="anki" className="settings-card">
+          <div className="section-heading section-heading-with-action">
+            <span className="section-number">02</span>
+            <div>
+              <h2>Anki cards</h2>
+              <p>Choose where cards are created and what each Anki field receives.</p>
             </div>
             <button
               type="button"
               onClick={() => void refreshAnki()}
               disabled={ankiStatus === 'loading'}
-              className="shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-wait disabled:opacity-50"
+              className="button button-secondary refresh-button"
             >
               {ankiStatus === 'loading' ? 'Connecting…' : 'Refresh from Anki'}
             </button>
           </div>
 
-          <div className="mt-4 min-h-5" aria-live="polite">
+          <div className="connection-status" aria-live="polite">
             {ankiStatus === 'ready' && (
-              <p className="flex items-center gap-2 text-xs font-medium text-emerald-700">
-                <span className="size-2 rounded-full bg-emerald-500" aria-hidden="true" />
-                Connected to Anki
-              </p>
+              <p className="status-connected"><span aria-hidden="true" />Connected to Anki</p>
             )}
-            {ankiStatus === 'loading' && (
-              <p className="text-xs text-gray-500">Reading decks and note types from Anki…</p>
-            )}
-            {ankiStatus === 'error' && ankiError && (
-              <p className="text-xs leading-relaxed text-rose-600" role="alert">
-                {ankiError}
-              </p>
-            )}
+            {ankiStatus === 'loading' && <p>Reading decks and note types from Anki…</p>}
+            {ankiStatus === 'error' && ankiError && <p className="error-message" role="alert">{ankiError}</p>}
           </div>
 
-          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
-            <div className="flex items-start justify-between gap-4">
+          <div className="queue-panel">
+            <div className="queue-heading">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">Offline queue</h3>
-                <p className="mt-1 text-xs leading-relaxed text-gray-600">
-                  Add cards while Anki is closed. They stay in this browser and sync automatically
-                  when Anki becomes available.
-                </p>
+                <p className="mini-label">Local safety net</p>
+                <h3>Offline queue</h3>
+                <p>Add cards while Anki is closed. They stay here and sync when Anki returns.</p>
               </div>
-              <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
-                {ankiQueueInfo.count} waiting
-              </span>
+              <span className="queue-count"><strong>{ankiQueueInfo.count}</strong> waiting</span>
             </div>
 
             {ankiQueueInfo.lastError && ankiQueueInfo.count > 0 && (
-              <p className="mt-3 text-xs leading-relaxed text-amber-800">
-                Last sync attempt: {ankiQueueInfo.lastError}
-              </p>
+              <p className="queue-error">Last sync attempt: {ankiQueueInfo.lastError}</p>
             )}
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <div className="queue-actions">
               <button
                 type="button"
                 onClick={() => void handleQueueSync()}
                 disabled={ankiQueueBusy || ankiQueueInfo.count === 0}
-                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+                className="button button-dark"
               >
                 {ankiQueueBusy ? 'Working…' : 'Sync now'}
               </button>
@@ -510,7 +572,7 @@ export default function Options() {
                 type="button"
                 onClick={() => void handleQueueExport('tsv')}
                 disabled={ankiQueueBusy || ankiQueueInfo.count === 0}
-                className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                className="button button-secondary"
               >
                 Export TSV
               </button>
@@ -518,119 +580,76 @@ export default function Options() {
                 type="button"
                 onClick={() => void handleQueueExport('csv')}
                 disabled={ankiQueueBusy || ankiQueueInfo.count === 0}
-                className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                className="button button-secondary"
               >
                 Export CSV
               </button>
             </div>
 
-            <p className="mt-3 text-xs leading-relaxed text-amber-900/80">
-              Manual TSV/CSV export is text-only and does not include generated pronunciation
-              media.
-            </p>
+            <p className="queue-note">Manual TSV/CSV export is text-only and does not include generated pronunciation media.</p>
 
             {ankiQueueInfo.count > 0 && (
               <button
                 type="button"
                 onClick={() => void handleQueueClear()}
                 disabled={ankiQueueBusy}
-                className="mt-3 text-xs font-medium text-rose-700 underline decoration-rose-300 underline-offset-2 disabled:opacity-40"
+                className="danger-link"
               >
                 Clear queue after manual import
               </button>
             )}
 
-            {ankiQueueNotice && (
-              <p className="mt-3 text-xs leading-relaxed text-gray-700" role="status">
-                {ankiQueueNotice}
-              </p>
-            )}
+            {ankiQueueNotice && <p className="queue-notice" role="status">{ankiQueueNotice}</p>}
           </div>
 
-          <form onSubmit={handleAnkiSave} className="mt-5 space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="anki-name">
-                Name
-              </label>
+          <form onSubmit={handleAnkiSave} className="settings-form anki-form">
+            <div className="form-field form-field-wide">
+              <label htmlFor="anki-name">Configuration name</label>
               <input
                 id="anki-name"
                 type="text"
                 value={ankiSettings.name}
-                onChange={event =>
-                  setAnkiSettingsState(settings => ({ ...settings, name: event.target.value }))
-                }
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onChange={event => setAnkiSettingsState(settings => ({ ...settings, name: event.target.value }))}
               />
             </div>
 
-            <div className="grid gap-5 sm:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="anki-deck">
-                  Deck
-                </label>
-                <select
-                  id="anki-deck"
-                  value={ankiSettings.deckName}
-                  onChange={event =>
-                    setAnkiSettingsState(settings => ({
-                      ...settings,
-                      deckName: event.target.value,
-                    }))
-                  }
-                  disabled={deckNames.length === 0}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
-                >
-                  {deckNames.length === 0 && (
-                    <option value={ankiSettings.deckName}>{ankiSettings.deckName || 'No decks found'}</option>
-                  )}
-                  {deckNames.map(deckName => (
-                    <option key={deckName} value={deckName}>
-                      {deckName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="anki-model">
-                  Model
-                </label>
-                <select
-                  id="anki-model"
-                  value={ankiSettings.modelName}
-                  onChange={event => void handleModelChange(event.target.value)}
-                  disabled={modelNames.length === 0}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
-                >
-                  {modelNames.length === 0 && (
-                    <option value={ankiSettings.modelName}>
-                      {ankiSettings.modelName || 'No models found'}
-                    </option>
-                  )}
-                  {modelNames.map(modelName => (
-                    <option key={modelName} value={modelName}>
-                      {modelName}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="form-field">
+              <label htmlFor="anki-deck">Deck</label>
+              <select
+                id="anki-deck"
+                value={ankiSettings.deckName}
+                onChange={event => setAnkiSettingsState(settings => ({ ...settings, deckName: event.target.value }))}
+                disabled={deckNames.length === 0}
+              >
+                {deckNames.length === 0 && (
+                  <option value={ankiSettings.deckName}>{ankiSettings.deckName || 'No decks found'}</option>
+                )}
+                {deckNames.map(deckName => <option key={deckName} value={deckName}>{deckName}</option>)}
+              </select>
             </div>
 
-            <div>
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4 border-b border-gray-200 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                <span>Field</span>
-                <span>Value</span>
-              </div>
+            <div className="form-field">
+              <label htmlFor="anki-model">Note type</label>
+              <select
+                id="anki-model"
+                value={ankiSettings.modelName}
+                onChange={event => void handleModelChange(event.target.value)}
+                disabled={modelNames.length === 0}
+              >
+                {modelNames.length === 0 && (
+                  <option value={ankiSettings.modelName}>{ankiSettings.modelName || 'No models found'}</option>
+                )}
+                {modelNames.map(modelName => <option key={modelName} value={modelName}>{modelName}</option>)}
+              </select>
+            </div>
+
+            <div className="field-mapping form-field-wide">
+              <div className="field-mapping-header"><span>Anki field</span><span>Learn Lang value</span></div>
               {modelFieldNames.length > 0 ? (
-                <div className="divide-y divide-gray-100">
+                <div className="field-mapping-rows">
                   {modelFieldNames.map((fieldName, fieldIndex) => (
-                    <div
-                      key={fieldName}
-                      className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-4 py-3"
-                    >
-                      <label className="truncate text-sm font-medium text-gray-700" htmlFor={`anki-field-${fieldIndex}`}>
-                        {fieldName}
-                      </label>
+                    <div key={fieldName} className="field-mapping-row">
+                      <label htmlFor={`anki-field-${fieldIndex}`}>{fieldName}</label>
                       <select
                         id={`anki-field-${fieldIndex}`}
                         value={ankiSettings.fieldMappings[fieldName] ?? ''}
@@ -643,41 +662,53 @@ export default function Options() {
                             },
                           }))
                         }
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="">Don’t add</option>
                         {ANKI_FIELD_VALUE_OPTIONS.map(option => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
+                          <option key={option.value} value={option.value}>{option.label}</option>
                         ))}
                       </select>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="py-5 text-sm text-gray-500">
-                  Connect to Anki and choose a model to configure its fields.
-                </p>
+                <p className="empty-state">Connect to Anki and choose a note type to configure its fields.</p>
               )}
             </div>
 
             {ankiStatus !== 'error' && ankiError && (
-              <p className="text-xs leading-relaxed text-rose-600" role="alert">
-                {ankiError}
-              </p>
+              <p className="error-message form-field-wide" role="alert">{ankiError}</p>
             )}
 
-            <button
-              type="submit"
-              disabled={modelFieldNames.length === 0}
-              className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 transition-colors disabled:cursor-not-allowed disabled:bg-gray-300"
-            >
-              {ankiSaved ? '✓ Anki settings saved' : 'Save Anki settings'}
-            </button>
+            <div className="form-action form-field-wide">
+              <button type="submit" disabled={modelFieldNames.length === 0} className="button button-primary">
+                {ankiSaved ? 'Anki settings saved ✓' : 'Save Anki settings'}
+              </button>
+              <span aria-live="polite">Field mappings apply to every new card.</span>
+            </div>
           </form>
         </section>
-      </div>
+
+        <footer className="page-footer">
+          <span>Learn Lang Tool</span>
+          <span>Private by default · Built for focused practice</span>
+        </footer>
+      </main>
+      {duplicateConflicts.length > 0 && (
+        <AnkiDuplicateDialog
+          conflicts={duplicateConflicts}
+          decisions={duplicateDecisions}
+          busy={ankiQueueBusy}
+          onDecision={(queueItemId, action) =>
+            setDuplicateDecisions(current => ({ ...current, [queueItemId]: action }))
+          }
+          onCancel={() => {
+            setDuplicateConflicts([]);
+            setDuplicateDecisions({});
+          }}
+          onConfirm={() => void handleDuplicateDecisions()}
+        />
+      )}
     </div>
   );
 }

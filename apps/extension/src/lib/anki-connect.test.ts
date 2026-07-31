@@ -3,10 +3,13 @@ import { DEFAULT_ANKI_SETTINGS, createAnkiNote } from './anki';
 import {
   addNoteWithAnkiConnect,
   browseNoteWithAnkiConnect,
+  findDuplicateNotesWithAnkiConnect,
   findQueuedNoteIdsWithAnkiConnect,
   getCollectionInfoWithAnkiConnect,
   getModelFieldNamesWithAnkiConnect,
   removeAnkiQueueTagWithAnkiConnect,
+  isAnkiDuplicateError,
+  AnkiConnectError,
 } from './anki-connect';
 
 function jsonResponse(result: unknown, error: string | null = null): Response {
@@ -130,6 +133,61 @@ describe('AnkiConnect client', () => {
       action: 'findNotes',
       params: { query: 'tag:llt_queue_queueid' },
     });
+  });
+
+  it('loads the existing note that caused a duplicate conflict', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ permission: 'granted' }))
+      .mockResolvedValueOnce(jsonResponse(['Word', 'Reading', 'Sentence', 'Meaning']))
+      .mockResolvedValueOnce(jsonResponse([321]))
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            noteId: 321,
+            modelName: 'Basic (and reversed card)',
+            tags: ['existing'],
+            fields: {
+              Meaning: { value: 'привет', order: 1 },
+              Word: { value: 'hello', order: 0 },
+            },
+          },
+        ]),
+      );
+
+    await expect(
+      findDuplicateNotesWithAnkiConnect(DEFAULT_ANKI_SETTINGS, note, { fetch: fetchMock }),
+    ).resolves.toEqual([
+      {
+        noteId: 321,
+        modelName: 'Basic (and reversed card)',
+        tags: ['existing'],
+        fields: { Word: 'hello', Meaning: 'привет' },
+      },
+    ]);
+
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body as string)).toEqual({
+      action: 'findNotes',
+      version: 6,
+      params: {
+        query: '"note:Basic (and reversed card)" "Word:hello"',
+      },
+    });
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body as string)).toMatchObject({
+      action: 'notesInfo',
+      params: { notes: [321] },
+    });
+  });
+
+  it('classifies only the AnkiConnect duplicate API error as a duplicate conflict', () => {
+    expect(
+      isAnkiDuplicateError(
+        new AnkiConnectError('api_error', 'cannot create note because it is a duplicate'),
+      ),
+    ).toBe(true);
+    expect(isAnkiDuplicateError(new Error('cannot create note because it is a duplicate'))).toBe(
+      false,
+    );
   });
 
   it('removes the private queue tag after a successful sync', async () => {

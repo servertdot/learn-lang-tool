@@ -75,6 +75,62 @@ describe('AnkiQueue', () => {
     });
   });
 
+  it('keeps duplicate conflicts queued without blocking the rest of the sync', async () => {
+    const ids = ['duplicate', 'normal'];
+    const queue = new AnkiQueue(createMemoryStorage(), { createId: () => ids.shift()! });
+    await queue.enqueue(note);
+    await queue.enqueue(
+      createAnkiNote(DEFAULT_ANKI_SETTINGS, {
+        textFrom: 'take a break',
+        textTo: 'сделай перерыв',
+        sentence: 'Take a break now.',
+      }),
+    );
+
+    const addNote = vi.fn().mockImplementation(async (_settings, candidate) => {
+      if (candidate.fields.Word === 'take it easy') {
+        throw new Error('cannot create note because it is a duplicate');
+      }
+      return 84;
+    });
+    const result = await syncAnkiQueue(queue, DEFAULT_ANKI_SETTINGS, {
+      findNoteIds: vi.fn().mockResolvedValue([]),
+      addNote,
+      isDuplicateError: error =>
+        error instanceof Error && error.message.includes('because it is a duplicate'),
+      findDuplicateNotes: vi.fn().mockResolvedValue([
+        {
+          noteId: 41,
+          modelName: 'Basic (and reversed card)',
+          fields: { Word: 'take it easy', Meaning: 'не спеши' },
+          tags: [],
+        },
+      ]),
+    });
+
+    expect(result.syncedCount).toBe(1);
+    expect(result.noteIds.normal).toBe(84);
+    expect(result.duplicateConflicts).toEqual([
+      expect.objectContaining({
+        queueItemId: 'duplicate',
+        existingNotes: [expect.objectContaining({ noteId: 41 })],
+      }),
+    ]);
+    expect((await queue.list()).map(item => item.id)).toEqual(['duplicate']);
+  });
+
+  it('applies the user decision to allow a duplicate on the next sync', async () => {
+    const queue = new AnkiQueue(createMemoryStorage(), { createId: () => 'duplicate' });
+    await queue.enqueue(note);
+    await queue.setError('duplicate', 'cannot create note because it is a duplicate');
+
+    await queue.allowDuplicate('duplicate');
+
+    const [item] = await queue.list();
+    expect(item?.note.options.allowDuplicate).toBe(true);
+    expect(item?.lastError).toBeUndefined();
+  });
+
   it('removes a card after it is added to Anki', async () => {
     const queue = new AnkiQueue(createMemoryStorage(), { createId: () => 'pending' });
     await queue.enqueue(note);
@@ -135,6 +191,27 @@ describe('AnkiQueue', () => {
     expect(addNote).not.toHaveBeenCalled();
     expect(result.error).toMatch(/Waiting for pronunciation/);
     expect((await queue.getInfo()).count).toBe(1);
+  });
+
+  it('syncs later cards while an earlier card is waiting for audio', async () => {
+    const ids = ['audio-pending', 'text-ready'];
+    const queue = new AnkiQueue(createMemoryStorage(), { createId: () => ids.shift()! });
+    await queue.enqueue(note, {
+      pronunciationRequest,
+      audioStatus: 'waiting_for_audio',
+    });
+    await queue.enqueue(note);
+    const addNote = vi.fn().mockResolvedValue(73);
+
+    const result = await syncAnkiQueue(queue, DEFAULT_ANKI_SETTINGS, {
+      findNoteIds: vi.fn().mockResolvedValue([]),
+      addNote,
+    });
+
+    expect(result.syncedCount).toBe(1);
+    expect(result.error).toMatch(/Waiting for pronunciation/);
+    expect(addNote).toHaveBeenCalledOnce();
+    expect((await queue.list()).map(item => item.id)).toEqual(['audio-pending']);
   });
 
   it('never falls back to a text-only note after audio generation failure', async () => {

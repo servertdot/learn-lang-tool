@@ -1,5 +1,5 @@
 import type { AnkiNote, AnkiSettings } from './anki';
-import type { AnkiConnectAudioAttachment } from './anki-connect';
+import type { AnkiConnectAudioAttachment, AnkiExistingNote } from './anki-connect';
 import type { AnkiQueue, AnkiQueueItem } from './anki-queue';
 import type { PronunciationArtifactStore } from './pronunciation-artifact-store';
 import { bytesToBase64 } from './pronunciation-artifact-store';
@@ -18,11 +18,23 @@ export interface AnkiQueueSyncDependencies {
   ): Promise<void>;
   artifactStore?: PronunciationArtifactStore;
   audioFieldsForNote?(settings: AnkiSettings, item: AnkiQueueItem): string[];
+  isDuplicateError?(error: unknown): boolean;
+  findDuplicateNotes?(
+    settings: AnkiSettings,
+    note: AnkiNote,
+  ): Promise<AnkiExistingNote[]>;
+}
+
+export interface AnkiDuplicateConflict {
+  queueItemId: string;
+  pendingNote: AnkiNote;
+  existingNotes: AnkiExistingNote[];
 }
 
 export interface AnkiQueueSyncResult {
   syncedCount: number;
   noteIds: Record<string, number>;
+  duplicateConflicts: AnkiDuplicateConflict[];
   error?: string;
 }
 
@@ -41,25 +53,19 @@ export async function syncAnkiQueue(
   dependencies: AnkiQueueSyncDependencies,
 ): Promise<AnkiQueueSyncResult> {
   const noteIds: Record<string, number> = {};
+  const duplicateConflicts: AnkiDuplicateConflict[] = [];
+  let deferredError: string | undefined;
+  const items = await queue.list();
 
-  while (true) {
-    const item = (await queue.list())[0];
-    if (!item) return { syncedCount: Object.keys(noteIds).length, noteIds };
-
+  for (const item of items) {
     if (item.audioStatus === 'waiting_for_audio') {
-      return {
-        syncedCount: Object.keys(noteIds).length,
-        noteIds,
-        error: 'Waiting for pronunciation audio before syncing to Anki.',
-      };
+      deferredError ??= 'Waiting for pronunciation audio before syncing to Anki.';
+      continue;
     }
 
     if (item.audioStatus === 'audio_failed') {
-      return {
-        syncedCount: Object.keys(noteIds).length,
-        noteIds,
-        error: item.lastError ?? 'Pronunciation audio generation failed.',
-      };
+      deferredError ??= item.lastError ?? 'Pronunciation audio generation failed.';
+      continue;
     }
 
     try {
@@ -116,7 +122,34 @@ export async function syncAnkiQueue(
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not sync the Anki queue.';
       await queue.setError(item.id, message);
-      return { syncedCount: Object.keys(noteIds).length, noteIds, error: message };
+      if (dependencies.isDuplicateError?.(error)) {
+        let existingNotes: AnkiExistingNote[] = [];
+        try {
+          existingNotes = (await dependencies.findDuplicateNotes?.(settings, item.note)) ?? [];
+        } catch {
+          // The conflict can still be resolved by the user even if its Anki
+          // details could not be loaded.
+        }
+        duplicateConflicts.push({
+          queueItemId: item.id,
+          pendingNote: item.note,
+          existingNotes,
+        });
+        continue;
+      }
+      return {
+        syncedCount: Object.keys(noteIds).length,
+        noteIds,
+        duplicateConflicts,
+        error: message,
+      };
     }
   }
+
+  return {
+    syncedCount: Object.keys(noteIds).length,
+    noteIds,
+    duplicateConflicts,
+    error: deferredError,
+  };
 }

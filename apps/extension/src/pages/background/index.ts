@@ -45,10 +45,12 @@ import { MAX_TRANSLATION_TEXT_LENGTH } from '@package/shared';
 import {
   addNoteWithAnkiConnect,
   browseNoteWithAnkiConnect,
+  findDuplicateNotesWithAnkiConnect,
   findQueuedNoteIdsWithAnkiConnect,
   getCollectionInfoWithAnkiConnect,
   getModelFieldNamesWithAnkiConnect,
   removeAnkiQueueTagWithAnkiConnect,
+  isAnkiDuplicateError,
 } from '@src/lib/anki-connect';
 import { exportAnkiQueue } from '@src/lib/anki-export';
 import { AnkiQueue, createChromeAnkiQueueStorage } from '@src/lib/anki-queue';
@@ -101,6 +103,8 @@ async function runAnkiQueueSync() {
     removeQueueTag: removeAnkiQueueTagWithAnkiConnect,
     artifactStore: pronunciationArtifactStore,
     audioFieldsForNote: ankiSettings => getAnkiAudioFieldNames(ankiSettings),
+    isDuplicateError: isAnkiDuplicateError,
+    findDuplicateNotes: findDuplicateNotesWithAnkiConnect,
   });
 }
 
@@ -552,10 +556,43 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
           sendResponse({
             ok: true,
             syncedCount: result.syncedCount,
+            duplicateConflicts: result.duplicateConflicts,
             ...info,
           } satisfies AnkiQueueSyncResponse);
         } catch (err) {
           const error = err instanceof Error ? err.message : 'Could not sync the Anki queue.';
+          sendResponse({ ok: false, error } satisfies AnkiQueueSyncResponse);
+        }
+        return;
+      }
+
+      if (message.type === 'llt.anki.queue.resolveDuplicates') {
+        try {
+          const queuedItems = new Map((await ankiQueue.list()).map(item => [item.id, item]));
+          for (const decision of message.decisions) {
+            const item = queuedItems.get(decision.queueItemId);
+            if (!item) continue;
+            if (decision.action === 'add') {
+              await ankiQueue.allowDuplicate(item.id);
+            } else {
+              await ankiQueue.remove(item.id);
+              if (item.artifactKey) {
+                await pronunciationArtifactStore.unpin(item.artifactKey);
+              }
+            }
+          }
+
+          const result = await syncQueuedAnkiCards();
+          const info = await ankiQueue.getInfo();
+          await updateAnkiQueueSyncAlarm();
+          sendResponse({
+            ok: true,
+            syncedCount: result.syncedCount,
+            duplicateConflicts: result.duplicateConflicts,
+            ...info,
+          } satisfies AnkiQueueSyncResponse);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Could not resolve Anki duplicates.';
           sendResponse({ ok: false, error } satisfies AnkiQueueSyncResponse);
         }
         return;

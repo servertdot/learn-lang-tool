@@ -252,6 +252,26 @@ export class AnkiQueue {
     });
   }
 
+  allowDuplicate(id: string): Promise<void> {
+    return this.exclusive(async () => {
+      const items = parseQueue(await this.storage.read());
+      await this.storage.write(
+        items.map(item =>
+          item.id === id
+            ? {
+                ...item,
+                lastError: undefined,
+                note: {
+                  ...item.note,
+                  options: { ...item.note.options, allowDuplicate: true },
+                },
+              }
+            : item,
+        ),
+      );
+    });
+  }
+
   setAudioFailed(id: string, error: string): Promise<void> {
     return this.exclusive(async () => {
       const items = parseQueue(await this.storage.read());

@@ -21,6 +21,14 @@ export class AnkiConnectError extends Error {
   }
 }
 
+export function isAnkiDuplicateError(error: unknown): boolean {
+  return (
+    error instanceof AnkiConnectError &&
+    error.code === 'api_error' &&
+    /cannot create note because it is a duplicate/i.test(error.message)
+  );
+}
+
 interface AnkiConnectResponse<T> {
   result: T;
   error: string | null;
@@ -52,8 +60,45 @@ export interface AnkiCollectionInfo {
   modelNames: string[];
 }
 
+export interface AnkiExistingNote {
+  noteId: number;
+  modelName: string;
+  fields: Record<string, string>;
+  tags: string[];
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+interface AnkiConnectNoteInfo {
+  noteId: number;
+  modelName: string;
+  tags: string[];
+  fields: Record<string, { value: string; order: number }>;
+}
+
+function isNoteInfo(value: unknown): value is AnkiConnectNoteInfo {
+  if (typeof value !== 'object' || value === null) return false;
+  const note = value as Partial<AnkiConnectNoteInfo>;
+  return (
+    typeof note.noteId === 'number' &&
+    typeof note.modelName === 'string' &&
+    isStringArray(note.tags) &&
+    typeof note.fields === 'object' &&
+    note.fields !== null &&
+    Object.values(note.fields).every(
+      field =>
+        typeof field === 'object' &&
+        field !== null &&
+        typeof field.value === 'string' &&
+        typeof field.order === 'number',
+    )
+  );
+}
+
+function quoteAnkiSearchTerm(value: string): string {
+  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
 async function ensurePermission(
@@ -237,6 +282,60 @@ export async function findQueuedNoteIdsWithAnkiConnect(
     );
   }
   return noteIds;
+}
+
+export async function findDuplicateNotesWithAnkiConnect(
+  settings: AnkiSettings,
+  note: AnkiNote,
+  dependencies: AnkiConnectDependencies = {},
+): Promise<AnkiExistingNote[]> {
+  await ensurePermission(settings, dependencies);
+  const fieldNames = await invoke<unknown>(
+    settings,
+    'modelFieldNames',
+    { modelName: note.modelName },
+    dependencies,
+  );
+  if (!isStringArray(fieldNames) || fieldNames.length === 0) {
+    throw new AnkiConnectError(
+      'invalid_response',
+      'AnkiConnect returned an unexpected model field list.',
+    );
+  }
+
+  const firstField = fieldNames[0];
+  const firstValue = note.fields[firstField] ?? '';
+  const query = [
+    quoteAnkiSearchTerm(`note:${note.modelName}`),
+    quoteAnkiSearchTerm(`${firstField}:${firstValue}`),
+  ].join(' ');
+  const noteIds = await invoke<unknown>(settings, 'findNotes', { query }, dependencies);
+  if (!Array.isArray(noteIds) || !noteIds.every(noteId => typeof noteId === 'number')) {
+    throw new AnkiConnectError(
+      'invalid_response',
+      'AnkiConnect returned an unexpected duplicate-note lookup response.',
+    );
+  }
+  if (noteIds.length === 0) return [];
+
+  const notes = await invoke<unknown>(settings, 'notesInfo', { notes: noteIds }, dependencies);
+  if (!Array.isArray(notes) || !notes.every(isNoteInfo)) {
+    throw new AnkiConnectError(
+      'invalid_response',
+      'AnkiConnect returned unexpected duplicate-note details.',
+    );
+  }
+
+  return notes.map(existing => ({
+    noteId: existing.noteId,
+    modelName: existing.modelName,
+    fields: Object.fromEntries(
+      Object.entries(existing.fields)
+        .sort(([, left], [, right]) => left.order - right.order)
+        .map(([name, field]) => [name, field.value]),
+    ),
+    tags: [...existing.tags],
+  }));
 }
 
 export async function removeAnkiQueueTagWithAnkiConnect(
