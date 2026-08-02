@@ -37,6 +37,11 @@ import { readPageTextSource, type PageTextSource } from '@src/lib/page-text-sour
 import { handleTranslationTrigger } from '@src/lib/translation-trigger';
 import { requestOpenExtensionOptions } from '@src/lib/open-extension-options';
 import { formatApproxSize as formatSpeechSize } from '@src/lib/speech-model-pack-registry';
+import {
+  canUseBrowserSpeech,
+  speakWithBrowser,
+  stopBrowserSpeech,
+} from '@src/lib/browser-speech';
 
 const host = document.createElement('div');
 host.id = '__llt-root';
@@ -78,6 +83,8 @@ interface PopoverData {
   pronunciationArtifactKey?: string;
   pronunciationRequest?: PronunciationRequest;
   speechPackIdForInstall?: string;
+  translatedPronunciationState: PronunciationControlState | null;
+  translatedPronunciationError: string | null;
 }
 
 function ContentApp() {
@@ -87,6 +94,7 @@ function ContentApp() {
   const hotkeyLoadedRef = useRef(false);
   const contextRef = useRef<string | null>(null);
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  const translatedSpeechRunRef = useRef(0);
 
   useEffect(() => {
     getHotkey().then(k => {
@@ -172,6 +180,9 @@ function ContentApp() {
     const y = sourceRect ? sourceRect.bottom + 8 : (pointerRef.current?.y ?? 100) + 8;
 
     abortRef.current?.abort();
+    translatedSpeechRunRef.current += 1;
+    stopBrowserSpeech(window);
+    void requestPronunciationStop();
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -190,6 +201,8 @@ function ContentApp() {
       pronunciationRequestId: null,
       pronunciationState: null,
       pronunciationError: null,
+      translatedPronunciationState: null,
+      translatedPronunciationError: null,
     });
 
     try {
@@ -198,6 +211,7 @@ function ContentApp() {
         controller.signal,
       );
       const pronunciationRequestId = crypto.randomUUID();
+      const translatedSpeechSupported = canUseBrowserSpeech(window);
       setPopover(prev =>
         prev
           ? {
@@ -207,6 +221,10 @@ function ContentApp() {
               pronunciationRequestId,
               pronunciationState: data.can_add_to_anki ? 'preparing' : null,
               pronunciationError: null,
+              translatedPronunciationState: translatedSpeechSupported ? 'ready' : 'unsupported',
+              translatedPronunciationError: translatedSpeechSupported
+                ? null
+                : 'Speech playback is unavailable in this browser.',
             }
           : null,
       );
@@ -285,6 +303,8 @@ function ContentApp() {
       void requestPronunciationCancel(requestId);
     }
     void requestPronunciationStop();
+    translatedSpeechRunRef.current += 1;
+    stopBrowserSpeech(window);
     setPopover(null);
   }, [popover?.pronunciationRequestId]);
 
@@ -450,7 +470,20 @@ function ContentApp() {
 
   const handlePlayPronunciation = useCallback(async () => {
     if (!popover?.pronunciationArtifactKey) return;
-    setPopover(prev => (prev ? { ...prev, pronunciationState: 'playing' } : null));
+    translatedSpeechRunRef.current += 1;
+    stopBrowserSpeech(window);
+    setPopover(prev =>
+      prev
+        ? {
+            ...prev,
+            pronunciationState: 'playing',
+            translatedPronunciationState:
+              prev.translatedPronunciationState === 'playing'
+                ? 'stopped'
+                : prev.translatedPronunciationState,
+          }
+        : null,
+    );
     const response = await requestPronunciationPlay(popover.pronunciationArtifactKey);
     if (!response.ok) {
       setPopover(prev =>
@@ -470,9 +503,62 @@ function ContentApp() {
   }, [popover?.pronunciationArtifactKey]);
 
   const handleStopPronunciation = useCallback(() => {
-    void requestPronunciationStop();
     setPopover(prev =>
       prev?.pronunciationState === 'playing' ? { ...prev, pronunciationState: 'stopped' } : prev,
+    );
+  }, []);
+
+  const handlePlayTranslatedPronunciation = useCallback(async () => {
+    if (!popover || popover.state.kind !== 'success') return;
+    const { translated_text: text, to_code: language } = popover.state.data;
+    const runId = translatedSpeechRunRef.current + 1;
+    translatedSpeechRunRef.current = runId;
+
+    void requestPronunciationStop();
+    setPopover(prev =>
+      prev
+        ? {
+            ...prev,
+            pronunciationState:
+              prev.pronunciationState === 'playing' ? 'stopped' : prev.pronunciationState,
+            translatedPronunciationState: 'playing',
+            translatedPronunciationError: null,
+          }
+        : null,
+    );
+
+    try {
+      await requestPronunciationStop().catch(() => undefined);
+      if (translatedSpeechRunRef.current !== runId) return;
+      await speakWithBrowser(text, language, window);
+      if (translatedSpeechRunRef.current !== runId) return;
+      setPopover(prev =>
+        prev?.translatedPronunciationState === 'playing'
+          ? { ...prev, translatedPronunciationState: 'stopped' }
+          : prev,
+      );
+    } catch (error) {
+      if (translatedSpeechRunRef.current !== runId) return;
+      setPopover(prev =>
+        prev
+          ? {
+              ...prev,
+              translatedPronunciationState: 'failed',
+              translatedPronunciationError:
+                error instanceof Error ? error.message : 'Could not play the translated text.',
+            }
+          : null,
+      );
+    }
+  }, [popover]);
+
+  const handleStopTranslatedPronunciation = useCallback(() => {
+    translatedSpeechRunRef.current += 1;
+    stopBrowserSpeech(window);
+    setPopover(prev =>
+      prev?.translatedPronunciationState === 'playing'
+        ? { ...prev, translatedPronunciationState: 'stopped' }
+        : prev,
     );
   }, []);
 
@@ -572,10 +658,15 @@ function ContentApp() {
       pronunciationState={popover.pronunciationState}
       pronunciationError={popover.pronunciationError}
       pronunciationApproxSizeBytes={popover.pronunciationApproxSizeBytes}
+      translatedPronunciationState={popover.translatedPronunciationState}
+      translatedPronunciationError={popover.translatedPronunciationError}
       onPlayPronunciation={() => void handlePlayPronunciation()}
       onStopPronunciation={handleStopPronunciation}
       onRetryPronunciation={handleRetryPronunciation}
       onInstallSpeechPack={() => void handleInstallSpeechPack()}
+      onPlayTranslatedPronunciation={() => void handlePlayTranslatedPronunciation()}
+      onStopTranslatedPronunciation={handleStopTranslatedPronunciation}
+      onRetryTranslatedPronunciation={() => void handlePlayTranslatedPronunciation()}
       onOpenSettings={() => {
         void requestOpenExtensionOptions().catch(error => {
           lltError('content', 'Could not open extension settings', error);

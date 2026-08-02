@@ -13,6 +13,7 @@ The goal is to help you learn expressions in the context where you found them—
 - Save the original text, translation, and context sentence to a local Anki queue.
 - Synchronize queued cards through AnkiConnect or export them as TSV/CSV.
 - Generate English pronunciation locally with Kokoro and attach it to Anki cards.
+- Play translated text with a browser or operating-system voice matching the target language.
 - Capture text from regular web pages, Google Docs, YouTube subtitles, and the built-in PDF viewer.
 - Configure the language pair, translation provider, hotkey, Anki connection, and pronunciation settings.
 
@@ -145,7 +146,7 @@ pnpm --filter @app/api dev          # http://localhost:3000
 
 - **Extension:** React 19, TypeScript, Vite, Tailwind CSS, Manifest V3
 - **Translation:** Google Translate, Bergamot WASM
-- **Pronunciation:** Kokoro, ONNX Runtime Web
+- **Pronunciation:** Kokoro, ONNX Runtime Web, Web Speech API
 - **Anki:** AnkiConnect, TSV/CSV export
 - **Optional API:** Fastify, TypeScript
 - **Optional translator:** FastAPI, Argos Translate, Poetry

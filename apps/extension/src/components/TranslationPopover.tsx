@@ -45,10 +45,15 @@ interface Props {
   pronunciationState?: PronunciationControlState | null;
   pronunciationError?: string | null;
   pronunciationApproxSizeBytes?: number;
+  translatedPronunciationState?: PronunciationControlState | null;
+  translatedPronunciationError?: string | null;
   onPlayPronunciation?: () => void;
   onStopPronunciation?: () => void;
   onRetryPronunciation?: () => void;
   onInstallSpeechPack?: () => void;
+  onPlayTranslatedPronunciation?: () => void;
+  onStopTranslatedPronunciation?: () => void;
+  onRetryTranslatedPronunciation?: () => void;
 }
 
 export function TranslationPopover({
@@ -64,10 +69,15 @@ export function TranslationPopover({
   pronunciationState = null,
   pronunciationError,
   pronunciationApproxSizeBytes,
+  translatedPronunciationState = null,
+  translatedPronunciationError,
   onPlayPronunciation,
   onStopPronunciation,
   onRetryPronunciation,
   onInstallSpeechPack,
+  onPlayTranslatedPronunciation,
+  onStopTranslatedPronunciation,
+  onRetryTranslatedPronunciation,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -162,6 +172,16 @@ export function TranslationPopover({
               Translation
             </p>
             <div className="flex items-center gap-1">
+              {translatedPronunciationState && (
+                <PronunciationControl
+                  state={translatedPronunciationState}
+                  contentLabel="translated text"
+                  errorMessage={translatedPronunciationError}
+                  onPlay={onPlayTranslatedPronunciation}
+                  onStop={onStopTranslatedPronunciation}
+                  onRetry={onRetryTranslatedPronunciation}
+                />
+              )}
               {state.data.can_add_to_anki && (
                 <AnkiActions
                   addState={ankiState}

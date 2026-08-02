@@ -22,10 +22,15 @@ interface PopupTranslationResultProps {
   pronunciationState?: PronunciationControlState | null;
   pronunciationError?: string | null;
   pronunciationApproxSizeBytes?: number;
+  translatedPronunciationState?: PronunciationControlState | null;
+  translatedPronunciationError?: string | null;
   onPlayPronunciation?: () => void;
   onStopPronunciation?: () => void;
   onRetryPronunciation?: () => void;
   onInstallSpeechPack?: () => void;
+  onPlayTranslatedPronunciation?: () => void;
+  onStopTranslatedPronunciation?: () => void;
+  onRetryTranslatedPronunciation?: () => void;
 }
 
 export function PopupTranslationResult({
@@ -39,10 +44,15 @@ export function PopupTranslationResult({
   pronunciationState = null,
   pronunciationError,
   pronunciationApproxSizeBytes,
+  translatedPronunciationState = null,
+  translatedPronunciationError,
   onPlayPronunciation,
   onStopPronunciation,
   onRetryPronunciation,
   onInstallSpeechPack,
+  onPlayTranslatedPronunciation,
+  onStopTranslatedPronunciation,
+  onRetryTranslatedPronunciation,
 }: PopupTranslationResultProps) {
   return (
     <section className="bg-white p-4">
@@ -51,6 +61,16 @@ export function PopupTranslationResult({
           Translation
         </p>
         <div className="flex items-center gap-1">
+          {translatedPronunciationState && (
+            <PronunciationControl
+              state={translatedPronunciationState}
+              contentLabel="translated text"
+              errorMessage={translatedPronunciationError}
+              onPlay={onPlayTranslatedPronunciation}
+              onStop={onStopTranslatedPronunciation}
+              onRetry={onRetryTranslatedPronunciation}
+            />
+          )}
           {result.can_add_to_anki && (
             <AnkiActions
               addState={ankiState}

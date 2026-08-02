@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { TranslateResponse } from '@package/shared';
 import { requestViewInAnki } from '@src/lib/messaging-anki';
 import {
@@ -16,6 +16,11 @@ import { formatApproxSize } from '@src/lib/speech-model-pack-registry';
 import { PopupTranslationResult } from './PopupTranslationResult';
 import type { AnkiAddState, AnkiViewState } from '@src/components/AnkiActions';
 import type { PronunciationControlState } from '@src/components/PronunciationControl';
+import {
+  canUseBrowserSpeech,
+  speakWithBrowser,
+  stopBrowserSpeech,
+} from '@src/lib/browser-speech';
 
 type PopupState =
   | { kind: 'loading'; sourceText: string }
@@ -44,6 +49,12 @@ export default function Popup() {
     PronunciationRequest | undefined
   >();
   const [speechPackIdForInstall, setSpeechPackIdForInstall] = useState<string | undefined>();
+  const [translatedPronunciationState, setTranslatedPronunciationState] =
+    useState<PronunciationControlState | null>(null);
+  const [translatedPronunciationError, setTranslatedPronunciationError] = useState<
+    string | null
+  >(null);
+  const translatedSpeechRunRef = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -68,6 +79,11 @@ export default function Popup() {
           controller.signal,
         );
         setState({ kind: 'success', result });
+        const translatedSpeechSupported = canUseBrowserSpeech(window);
+        setTranslatedPronunciationState(translatedSpeechSupported ? 'ready' : 'unsupported');
+        setTranslatedPronunciationError(
+          translatedSpeechSupported ? null : 'Speech playback is unavailable in this browser.',
+        );
         if (result.can_add_to_anki) {
           const requestId = crypto.randomUUID();
           setPronunciationRequestId(requestId);
@@ -99,6 +115,8 @@ export default function Popup() {
     return () => {
       controller.abort();
       void requestPronunciationStop();
+      translatedSpeechRunRef.current += 1;
+      stopBrowserSpeech(window);
     };
   }, []);
 
@@ -161,6 +179,9 @@ export default function Popup() {
 
   const handlePlayPronunciation = async () => {
     if (!pronunciationArtifactKey) return;
+    translatedSpeechRunRef.current += 1;
+    stopBrowserSpeech(window);
+    setTranslatedPronunciationState(current => (current === 'playing' ? 'stopped' : current));
     setPronunciationState('playing');
     const response = await requestPronunciationPlay(pronunciationArtifactKey);
     if (!response.ok) {
@@ -169,6 +190,37 @@ export default function Popup() {
       return;
     }
     setPronunciationState('stopped');
+  };
+
+  const handlePlayTranslatedPronunciation = async () => {
+    if (state.kind !== 'success') return;
+    const runId = translatedSpeechRunRef.current + 1;
+    translatedSpeechRunRef.current = runId;
+
+    setPronunciationState(current => (current === 'playing' ? 'stopped' : current));
+    setTranslatedPronunciationState('playing');
+    setTranslatedPronunciationError(null);
+
+    try {
+      await requestPronunciationStop().catch(() => undefined);
+      if (translatedSpeechRunRef.current !== runId) return;
+      await speakWithBrowser(state.result.translated_text, state.result.to_code, window);
+      if (translatedSpeechRunRef.current === runId) {
+        setTranslatedPronunciationState('stopped');
+      }
+    } catch (error) {
+      if (translatedSpeechRunRef.current !== runId) return;
+      setTranslatedPronunciationState('failed');
+      setTranslatedPronunciationError(
+        error instanceof Error ? error.message : 'Could not play the translated text.',
+      );
+    }
+  };
+
+  const handleStopTranslatedPronunciation = () => {
+    translatedSpeechRunRef.current += 1;
+    stopBrowserSpeech(window);
+    setTranslatedPronunciationState('stopped');
   };
 
   const handleRetryPronunciation = async () => {
@@ -243,6 +295,8 @@ export default function Popup() {
           pronunciationState={pronunciationState}
           pronunciationError={pronunciationError}
           pronunciationApproxSizeBytes={pronunciationApproxSizeBytes}
+          translatedPronunciationState={translatedPronunciationState}
+          translatedPronunciationError={translatedPronunciationError}
           onPlayPronunciation={() => void handlePlayPronunciation()}
           onStopPronunciation={() => {
             void requestPronunciationStop();
@@ -250,6 +304,9 @@ export default function Popup() {
           }}
           onRetryPronunciation={() => void handleRetryPronunciation()}
           onInstallSpeechPack={() => void handleInstallSpeechPack()}
+          onPlayTranslatedPronunciation={() => void handlePlayTranslatedPronunciation()}
+          onStopTranslatedPronunciation={handleStopTranslatedPronunciation}
+          onRetryTranslatedPronunciation={() => void handlePlayTranslatedPronunciation()}
         />
       )}
 

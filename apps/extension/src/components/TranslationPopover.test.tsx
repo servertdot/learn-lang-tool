@@ -22,7 +22,9 @@ describe('TranslationPopover', () => {
         onViewInAnki={vi.fn()}
         onOpenSettings={vi.fn()}
         pronunciationState="ready"
+        translatedPronunciationState="ready"
         onPlayPronunciation={vi.fn()}
+        onPlayTranslatedPronunciation={vi.fn()}
       />,
     );
 
@@ -30,6 +32,7 @@ describe('TranslationPopover', () => {
     expect(html).toContain('aria-label="View added note in Anki"');
     expect(html).toContain('aria-label="Open settings"');
     expect(html).toContain('aria-label="Play pronunciation"');
+    expect(html).toContain('aria-label="Play translated text"');
     expect(html).toContain('Translation');
     expect(html).toContain('Original');
     expect(html).toContain('привет');

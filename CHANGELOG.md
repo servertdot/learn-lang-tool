@@ -2,6 +2,14 @@
 
 All notable changes to Learn Lang Tool are documented in this file.
 
+## 1.0.2 - 2026-08-02
+
+### Improvements
+
+- Play translated text directly from the translation popover and browser popup.
+- Use a browser or operating-system voice matching the configured target language.
+- Keep original and translated playback coordinated so only one plays at a time.
+
 ## 1.0.1 - 2026-07-31
 
 ### Improvements

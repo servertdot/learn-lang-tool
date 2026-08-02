@@ -29,6 +29,24 @@ describe('PopupTranslationResult', () => {
     expect(html).not.toContain('aria-label="View added note in Anki"');
   });
 
+  it('shows a play action for translated text', () => {
+    const html = renderToStaticMarkup(
+      <PopupTranslationResult
+        result={result}
+        ankiState="idle"
+        ankiViewState="idle"
+        ankiError={null}
+        onAddToAnki={vi.fn()}
+        onViewInAnki={vi.fn()}
+        onOpenSettings={vi.fn()}
+        translatedPronunciationState="ready"
+        onPlayTranslatedPronunciation={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Play translated text"');
+  });
+
   it('shows the View in Anki action after the card is added', () => {
     const html = renderToStaticMarkup(
       <PopupTranslationResult

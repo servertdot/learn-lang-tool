@@ -6,6 +6,7 @@ export type PronunciationControlState = PronunciationUiState;
 
 interface PronunciationControlProps {
   state: PronunciationControlState;
+  contentLabel?: string;
   approxSizeBytes?: number;
   errorMessage?: string | null;
   onPlay?: () => void;
@@ -14,28 +15,29 @@ interface PronunciationControlProps {
   onInstallSpeechPack?: () => void;
 }
 
-function accessibleName(state: PronunciationControlState): string {
+function accessibleName(state: PronunciationControlState, contentLabel: string): string {
   switch (state) {
     case 'preparing':
-      return 'Preparing pronunciation';
+      return `Preparing ${contentLabel}`;
     case 'ready':
     case 'stopped':
-      return 'Play pronunciation';
+      return `Play ${contentLabel}`;
     case 'playing':
-      return 'Stop pronunciation';
+      return `Stop ${contentLabel}`;
     case 'failed':
-      return 'Retry pronunciation';
+      return `Retry ${contentLabel}`;
     case 'pack_missing':
       return 'Download speech model';
     case 'unsupported':
-      return 'Pronunciation unavailable';
+      return `${contentLabel[0]?.toUpperCase() ?? ''}${contentLabel.slice(1)} unavailable`;
     default:
-      return 'Pronunciation';
+      return `${contentLabel[0]?.toUpperCase() ?? ''}${contentLabel.slice(1)}`;
   }
 }
 
 export function PronunciationControl({
   state,
+  contentLabel = 'pronunciation',
   approxSizeBytes,
   errorMessage,
   onPlay,
@@ -77,8 +79,8 @@ export function PronunciationControl({
           else if (isPlaying) onStop?.();
           else if (canPlay) onPlay?.();
         }}
-        title={accessibleName(state)}
-        aria-label={accessibleName(state)}
+        title={accessibleName(state, contentLabel)}
+        aria-label={accessibleName(state, contentLabel)}
         className={`grid size-5 place-items-center rounded border transition-colors disabled:cursor-default disabled:opacity-60 ${
           state === 'failed' || state === 'pack_missing'
             ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
