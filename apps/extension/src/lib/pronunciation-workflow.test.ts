@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { TranslateResponse } from '@package/shared';
+import type { TranslationProvider } from '@package/shared';
 import {
   TtsError,
-  type AudioTtsProvider,
   type PronunciationArtifact,
   type PronunciationRequest,
 } from './audio-tts-provider';
@@ -13,7 +12,9 @@ import { createMemoryPronunciationArtifactStore } from './pronunciation-artifact
 import {
   enqueueCardWithRequiredAudio,
   fulfillQueuedPronunciation,
-  preparePronunciationForResult,
+  runPronunciationWorkflow,
+  type PronunciationWorkflowDependencies,
+  type PronunciationWorkflowInput,
 } from './pronunciation-workflow';
 
 function createMemoryStorage(): AnkiQueueStorage & { value: unknown } {
@@ -28,13 +29,18 @@ function createMemoryStorage(): AnkiQueueStorage & { value: unknown } {
   };
 }
 
-const result: TranslateResponse = {
-  source_text: 'hello',
-  translated_text: 'привет',
-  from_code: 'en',
-  to_code: 'ru',
-  can_add_to_anki: true,
-};
+function input(
+  overrides: Partial<PronunciationWorkflowInput> = {},
+): PronunciationWorkflowInput {
+  return {
+    requestId: 'request-1',
+    text: 'hello',
+    language: 'en',
+    translationProvider: 'google',
+    purpose: 'preview',
+    ...overrides,
+  };
+}
 
 function fakeArtifact(request: PronunciationRequest): PronunciationArtifact {
   return {
@@ -43,132 +49,266 @@ function fakeArtifact(request: PronunciationRequest): PronunciationArtifact {
     bytes: new Uint8Array([9, 9, 9]),
     mimeType: 'audio/mpeg',
     extension: 'mp3',
-    sampleRate: 24000,
+    sampleRate: 24_000,
     language: request.language,
     voiceId: request.voiceId,
     speed: request.speed,
   };
 }
 
-function createFakeProvider(
-  synthesizeImpl?: AudioTtsProvider['synthesize'],
-): AudioTtsProvider {
+function dependencies(
+  overrides: Partial<PronunciationWorkflowDependencies> = {},
+): PronunciationWorkflowDependencies {
   return {
-    id: 'kokoro',
-    revision: 'v1.0',
-    supportsLanguage: language => language === 'en',
-    requiredModelPackIds: () => ['kokoro-en-v1.0'],
-    synthesize:
-      synthesizeImpl ??
-      (async (request, signal) => {
-        if (signal?.aborted) {
-          throw new TtsError('request_cancelled', 'cancelled');
-        }
-        return fakeArtifact(request);
-      }),
+    artifactStore: createMemoryPronunciationArtifactStore(),
+    getSpeechPackStatus: async () => 'ready',
+    synthesize: async request => fakeArtifact(request),
+    ...overrides,
   };
 }
 
-describe('preparePronunciationForResult', () => {
-  it('reports pack_missing without downloading when the speech pack is not ready', async () => {
-    const synthesize = vi.fn();
-    const state = await preparePronunciationForResult(result, 'req-1', {
-      ttsProvider: createFakeProvider(synthesize),
-      artifactStore: createMemoryPronunciationArtifactStore(),
-      getSpeechPackStatus: async () => 'missing',
-    });
+describe('runPronunciationWorkflow', () => {
+  it('plays a Google artifact and never invokes Kokoro or Web Speech after success', async () => {
+    const synthesize = vi.fn(async request => fakeArtifact(request));
+    const playArtifact = vi.fn().mockResolvedValue(undefined);
+    const playWebSpeech = vi.fn();
 
-    expect(state.uiState).toBe('pack_missing');
-    expect(state.speechModelPackId).toBe('kokoro-en-v1.0');
-    expect(state.approxSizeBytes).toBeGreaterThan(1_000_000);
-    expect(synthesize).not.toHaveBeenCalled();
-  });
-
-  it('prepares audio after the speech pack is ready', async () => {
-    const store = createMemoryPronunciationArtifactStore();
-    const state = await preparePronunciationForResult(result, 'req-2', {
-      ttsProvider: createFakeProvider(),
-      artifactStore: store,
-      getSpeechPackStatus: async () => 'ready',
-    });
-
-    expect(state.uiState).toBe('ready');
-    expect(state.artifactKey).toMatch(/^pron:/);
-    expect(await store.get(state.artifactKey!)).not.toBeNull();
-  });
-
-  it('reuses a cached artifact for an identical request', async () => {
-    const store = createMemoryPronunciationArtifactStore();
-    const synthesize = vi.fn(async (request: PronunciationRequest) => fakeArtifact(request));
-    const deps = {
-      ttsProvider: createFakeProvider(synthesize),
-      artifactStore: store,
-      getSpeechPackStatus: async () => 'ready' as const,
-    };
-
-    const first = await preparePronunciationForResult(result, 'req-a', deps);
-    const second = await preparePronunciationForResult(result, 'req-b', deps);
-
-    expect(first.artifactKey).toBe(second.artifactKey);
-    expect(synthesize).toHaveBeenCalledOnce();
-  });
-
-  it('returns unsupported for languages without an enabled provider', async () => {
-    const state = await preparePronunciationForResult(
-      { ...result, from_code: 'ru', source_text: 'привет' },
-      'req-ru',
-      {
-        ttsProvider: createFakeProvider(),
-        artifactStore: createMemoryPronunciationArtifactStore(),
-        getSpeechPackStatus: async () => 'ready',
-      },
+    const state = await runPronunciationWorkflow(
+      input({ text: 'exact visible text' }),
+      dependencies({ synthesize, playArtifact, playWebSpeech }),
     );
 
-    expect(state.uiState).toBe('unsupported');
-    expect(state.errorCode).toBe('language_unsupported');
+    expect(state).toMatchObject({
+      uiState: 'stopped',
+      providerId: 'google-translate-web',
+      playbackKind: 'artifact',
+    });
+    expect(synthesize).toHaveBeenCalledOnce();
+    expect(synthesize.mock.calls[0][0]).toMatchObject({
+      text: 'exact visible text',
+      providerId: 'google-translate-web',
+    });
+    expect(playArtifact).toHaveBeenCalledOnce();
+    expect(playWebSpeech).not.toHaveBeenCalled();
   });
 
-  it('surfaces generation failure without hiding the translation result', async () => {
-    const state = await preparePronunciationForResult(result, 'req-fail', {
-      ttsProvider: createFakeProvider(async () => {
-        throw new TtsError('generation_failed', 'Kokoro crashed');
-      }),
-      artifactStore: createMemoryPronunciationArtifactStore(),
-      getSpeechPackStatus: async () => 'ready',
+  it('restarts the complete text with Kokoro after a fallback-worthy Google failure', async () => {
+    const synthesize = vi.fn(async (request: PronunciationRequest) => {
+      if (request.providerId === 'google-translate-web') {
+        throw new TtsError('generation_failed', 'remote unavailable');
+      }
+      return fakeArtifact(request);
     });
 
-    expect(state).toMatchObject({
-      uiState: 'failed',
-      errorCode: 'generation_failed',
-      errorMessage: 'Kokoro crashed',
+    const state = await runPronunciationWorkflow(
+      input({ text: 'the complete original text' }),
+      dependencies({ synthesize }),
+    );
+
+    expect(state).toMatchObject({ uiState: 'ready', providerId: 'kokoro' });
+    expect(synthesize).toHaveBeenCalledTimes(2);
+    expect(synthesize.mock.calls.map(call => call[0].text)).toEqual([
+      'the complete original text',
+      'the complete original text',
+    ]);
+  });
+
+  it('skips a missing Kokoro pack during preview and uses Web Speech without prompting', async () => {
+    const synthesize = vi.fn<PronunciationWorkflowDependencies['synthesize']>(async () => {
+      throw new TtsError('generation_failed', 'remote unavailable');
     });
+    const playWebSpeech = vi.fn().mockResolvedValue(undefined);
+
+    const state = await runPronunciationWorkflow(
+      input(),
+      dependencies({
+        synthesize,
+        getSpeechPackStatus: async () => 'missing',
+        playWebSpeech,
+      }),
+    );
+
+    expect(state).toMatchObject({
+      uiState: 'stopped',
+      playbackKind: 'web_speech',
+      providerId: 'web-speech',
+    });
+    expect(synthesize).toHaveBeenCalledOnce();
+    expect(synthesize.mock.calls.some(call => call[0].providerId === 'kokoro')).toBe(false);
+    expect(playWebSpeech).toHaveBeenCalledWith('hello', 'en', expect.any(AbortSignal));
+    expect(state.speechModelPackId).toBeUndefined();
+  });
+
+  it('uses Web Speech when Google and ready Kokoro both fail', async () => {
+    const synthesize = vi.fn(async () => {
+      throw new TtsError('generation_failed', 'provider failed');
+    });
+    const playWebSpeech = vi.fn().mockResolvedValue(undefined);
+
+    const state = await runPronunciationWorkflow(
+      input(),
+      dependencies({ synthesize, playWebSpeech }),
+    );
+
+    expect(synthesize).toHaveBeenCalledTimes(2);
+    expect(playWebSpeech).toHaveBeenCalledOnce();
+    expect(state.uiState).toBe('stopped');
+  });
+
+  it.each([
+    ['preview', 'google', ['google-translate-web', 'kokoro'], true],
+    ['anki', 'google', ['google-translate-web', 'kokoro'], false],
+    ['preview', 'bergamot', ['kokoro'], true],
+    ['anki', 'bergamot', ['kokoro'], false],
+  ] as const)(
+    'routes %s with %s through the fixed policy',
+    async (purpose, translationProvider, expectedProviders, allowsWebSpeech) => {
+      const synthesize = vi.fn<PronunciationWorkflowDependencies['synthesize']>(async () => {
+        throw new TtsError('generation_failed', 'failed');
+      });
+      const playWebSpeech = vi.fn().mockResolvedValue(undefined);
+
+      await runPronunciationWorkflow(
+        input({ purpose, translationProvider }),
+        dependencies({ synthesize, playWebSpeech }),
+      );
+
+      expect(synthesize.mock.calls.map(call => call[0].providerId)).toEqual(expectedProviders);
+      expect(playWebSpeech).toHaveBeenCalledTimes(allowsWebSpeech ? 1 : 0);
+    },
+  );
+
+  it('never invokes Google for Bergamot even when every local preview capability fails', async () => {
+    const synthesize = vi.fn<PronunciationWorkflowDependencies['synthesize']>(async () => {
+      throw new TtsError('generation_failed', 'local failed');
+    });
+    const playWebSpeech = vi.fn().mockRejectedValue(new Error('browser speech failed'));
+
+    const state = await runPronunciationWorkflow(
+      input({ translationProvider: 'bergamot' }),
+      dependencies({ synthesize, playWebSpeech }),
+    );
+
+    expect(synthesize.mock.calls.map(call => call[0].providerId)).toEqual(['kokoro']);
+    expect(state).toMatchObject({ uiState: 'failed', errorCode: 'generation_failed' });
+  });
+
+  it('returns a Kokoro consent state for Anki instead of substituting Web Speech', async () => {
+    const playWebSpeech = vi.fn();
+    const state = await runPronunciationWorkflow(
+      input({ purpose: 'anki' }),
+      dependencies({
+        synthesize: async request => {
+          if (request.providerId === 'google-translate-web') {
+            throw new TtsError('generation_failed', 'remote unavailable');
+          }
+          return fakeArtifact(request);
+        },
+        getSpeechPackStatus: async () => 'missing',
+        playWebSpeech,
+      }),
+    );
+
+    expect(state).toMatchObject({
+      uiState: 'pack_missing',
+      speechModelPackId: 'kokoro-en-v1.0',
+    });
+    expect(state.pronunciationRequests?.map(request => request.providerId)).toEqual([
+      'google-translate-web',
+      'kokoro',
+    ]);
+    expect(playWebSpeech).not.toHaveBeenCalled();
+  });
+
+  it('treats deliberate cancellation as terminal and never falls back', async () => {
+    const controller = new AbortController();
+    const synthesize = vi.fn((_request: PronunciationRequest, signal?: AbortSignal) =>
+      new Promise<PronunciationArtifact>((_resolve, reject) => {
+        signal?.addEventListener('abort', () =>
+          reject(new TtsError('request_cancelled', 'cancelled')),
+        );
+      }),
+    );
+    const playWebSpeech = vi.fn();
+
+    const pending = runPronunciationWorkflow(
+      input(),
+      dependencies({ synthesize, playWebSpeech }),
+      controller.signal,
+    );
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({
+      uiState: 'stopped',
+      errorCode: 'request_cancelled',
+    });
+    expect(synthesize.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(synthesize.mock.calls.some(call => call[0].providerId === 'kokoro')).toBe(false);
+    expect(playWebSpeech).not.toHaveBeenCalled();
+  });
+
+  it('reuses a cached artifact for replay in the same active result', async () => {
+    const store = createMemoryPronunciationArtifactStore();
+    const synthesize = vi.fn(async request => fakeArtifact(request));
+    const playArtifact = vi.fn().mockResolvedValue(undefined);
+    const deps = dependencies({ artifactStore: store, synthesize, playArtifact });
+
+    await runPronunciationWorkflow(input(), deps);
+    await runPronunciationWorkflow(input(), deps);
+
+    expect(synthesize).toHaveBeenCalledOnce();
+    expect(playArtifact).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the requested original or translated exact text and language independently', async () => {
+    const synthesize = vi.fn(async request => fakeArtifact(request));
+
+    await runPronunciationWorkflow(
+      input({ text: 'source only', language: 'en' }),
+      dependencies({ synthesize }),
+    );
+    await runPronunciationWorkflow(
+      input({ text: 'traducción only', language: 'es' }),
+      dependencies({ synthesize }),
+    );
+
+    expect(synthesize.mock.calls[0][0]).toMatchObject({ text: 'source only', language: 'en' });
+    expect(synthesize.mock.calls[1][0]).toMatchObject({ text: 'traducción only', language: 'es' });
   });
 });
 
 describe('queue-first pronunciation and Anki sync', () => {
-  it('lets the learner queue a card while audio is still preparing', async () => {
+  const note = createAnkiNote(DEFAULT_ANKI_SETTINGS, {
+    textFrom: 'hello',
+    textTo: 'привет',
+    sentence: 'hello',
+  });
+  const googleRequest = {
+    text: 'hello',
+    language: 'en',
+    providerId: 'google-translate-web',
+    providerRevision: 'translate-tts-v1-mp3-assembly-v1',
+    voiceId: 'google-translate-web:en',
+    speed: 1,
+    encodingVersion: 2,
+  };
+  const kokoroRequest = {
+    text: 'hello',
+    language: 'en',
+    providerId: 'kokoro',
+    providerRevision: 'v1.0',
+    voiceId: 'af_heart',
+    speed: 1,
+    encodingVersion: 2,
+  };
+
+  it('queues while preparing and later fulfills in durable provider order', async () => {
     const queue = new AnkiQueue(createMemoryStorage(), { createId: () => 'q1' });
     const store = createMemoryPronunciationArtifactStore();
-    const note = createAnkiNote(DEFAULT_ANKI_SETTINGS, {
-      textFrom: 'hello',
-      textTo: 'привет',
-      sentence: 'hello',
-    });
-    const request = {
-      text: 'hello',
-      language: 'en',
-      providerId: 'kokoro',
-      providerRevision: 'v1.0',
-      voiceId: 'af_heart',
-      speed: 1,
-      encodingVersion: 2,
-    };
-
-    const enqueued = await enqueueCardWithRequiredAudio(queue, {
+    await enqueueCardWithRequiredAudio(queue, {
       note,
-      pronunciationRequest: request,
+      pronunciationRequests: [googleRequest, kokoroRequest],
     });
-    expect(enqueued.audioStatus).toBe('waiting_for_audio');
 
     const addNote = vi.fn();
     const blocked = await syncAnkiQueue(queue, DEFAULT_ANKI_SETTINGS, {
@@ -180,62 +320,112 @@ describe('queue-first pronunciation and Anki sync', () => {
     expect(addNote).not.toHaveBeenCalled();
     expect(blocked.error).toMatch(/Waiting for pronunciation/);
 
-    await fulfillQueuedPronunciation(queue, {
-      ttsProvider: createFakeProvider(),
-      artifactStore: store,
-      getSpeechPackStatus: async () => 'ready',
+    const synthesize = vi.fn(async (request: PronunciationRequest) => {
+      if (request.providerId === 'google-translate-web') {
+        throw new TtsError('generation_failed', 'remote failed');
+      }
+      return fakeArtifact(request);
+    });
+    await fulfillQueuedPronunciation(
+      queue,
+      dependencies({ artifactStore: store, synthesize }),
+    );
+
+    expect(synthesize.mock.calls.map(call => call[0].providerId)).toEqual([
+      'google-translate-web',
+      'kokoro',
+    ]);
+    expect((await queue.list())[0]).toMatchObject({
+      audioStatus: 'ready_to_sync',
+      pronunciationRequests: [googleRequest, kokoroRequest],
+    });
+  });
+
+  it('keeps both-provider failure visible and retryable after restart', async () => {
+    const storage = createMemoryStorage();
+    const queue = new AnkiQueue(storage, { createId: () => 'q-fail' });
+    const store = createMemoryPronunciationArtifactStore();
+    await enqueueCardWithRequiredAudio(queue, {
+      note,
+      pronunciationRequests: [googleRequest, kokoroRequest],
     });
 
-    const synced = await syncAnkiQueue(queue, DEFAULT_ANKI_SETTINGS, {
+    await fulfillQueuedPronunciation(
+      queue,
+      dependencies({
+        artifactStore: store,
+        synthesize: async () => {
+          throw new TtsError('generation_failed', 'provider failed');
+        },
+      }),
+    );
+    expect((await queue.list())[0]).toMatchObject({
+      audioStatus: 'audio_failed',
+      lastError: 'provider failed',
+    });
+
+    const restartedQueue = new AnkiQueue(storage);
+    await fulfillQueuedPronunciation(
+      restartedQueue,
+      dependencies({ artifactStore: store }),
+    );
+    expect((await restartedQueue.list())[0]?.audioStatus).toBe('ready_to_sync');
+  });
+
+  it('continues to fulfill legacy queue entries with one pronunciation request', async () => {
+    const storage = createMemoryStorage();
+    const queue = new AnkiQueue(storage, { createId: () => 'legacy-audio' });
+    await queue.enqueue(note, { pronunciationRequest: kokoroRequest });
+
+    await fulfillQueuedPronunciation(queue, dependencies());
+
+    expect((await queue.list())[0]).toMatchObject({ audioStatus: 'ready_to_sync' });
+  });
+
+  it('pins a chosen artifact before queue sync and releases it only after confirmed sync', async () => {
+    const queue = new AnkiQueue(createMemoryStorage(), { createId: () => 'pinned-artifact' });
+    const store = createMemoryPronunciationArtifactStore();
+    const prepared = await runPronunciationWorkflow(
+      input({ purpose: 'anki' }),
+      dependencies({ artifactStore: store }),
+    );
+
+    await enqueueCardWithRequiredAudio(
+      queue,
+      {
+        note,
+        pronunciationRequests: prepared.pronunciationRequests,
+        artifactKey: prepared.artifactKey,
+      },
+      store,
+    );
+    expect((await store.get(prepared.artifactKey!))?.pinned).toBe(true);
+
+    await syncAnkiQueue(queue, DEFAULT_ANKI_SETTINGS, {
       findNoteIds: vi.fn().mockResolvedValue([]),
       addNote: vi.fn().mockResolvedValue(101),
       artifactStore: store,
       audioFieldsForNote: () => ['Reading'],
     });
 
-    expect(synced.noteIds.q1).toBe(101);
-    expect((await queue.getInfo()).count).toBe(0);
+    expect((await queue.list()).length).toBe(0);
+    expect((await store.get(prepared.artifactKey!))?.pinned).toBe(false);
   });
 
-  it('keeps failed audio generation visible and retryable on the queue', async () => {
-    const queue = new AnkiQueue(createMemoryStorage(), { createId: () => 'q-fail' });
-    const store = createMemoryPronunciationArtifactStore();
-    const note = createAnkiNote(DEFAULT_ANKI_SETTINGS, {
-      textFrom: 'hello',
-      textTo: 'привет',
-      sentence: 'hello',
-    });
-    const pronunciationRequest = {
-      text: 'hello',
-      language: 'en',
-      providerId: 'kokoro',
-      providerRevision: 'v1.0',
-      voiceId: 'af_heart',
-      speed: 1,
-      encodingVersion: 2,
-    };
-
-    await enqueueCardWithRequiredAudio(queue, { note, pronunciationRequest });
-
-    await fulfillQueuedPronunciation(queue, {
-      ttsProvider: createFakeProvider(async () => {
-        throw new TtsError('generation_failed', 'encode failed');
-      }),
-      artifactStore: store,
-      getSpeechPackStatus: async () => 'ready',
-    });
-
-    expect((await queue.list())[0]).toMatchObject({
-      audioStatus: 'audio_failed',
-      lastError: 'encode failed',
-    });
-
-    await fulfillQueuedPronunciation(queue, {
-      ttsProvider: createFakeProvider(),
-      artifactStore: store,
-      getSpeechPackStatus: async () => 'ready',
-    });
-
-    expect((await queue.list())[0]?.audioStatus).toBe('ready_to_sync');
-  });
+  it.each(['google', 'bergamot'] as TranslationProvider[])(
+    'never syncs a post-feature %s card without required encoded audio',
+    async () => {
+      const queue = new AnkiQueue(createMemoryStorage(), { createId: () => 'required-audio' });
+      await enqueueCardWithRequiredAudio(queue, {
+        note,
+        pronunciationRequests: [googleRequest],
+      });
+      const addNote = vi.fn();
+      await syncAnkiQueue(queue, DEFAULT_ANKI_SETTINGS, {
+        findNoteIds: vi.fn(),
+        addNote,
+      });
+      expect(addNote).not.toHaveBeenCalled();
+    },
+  );
 });

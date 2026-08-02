@@ -31,6 +31,7 @@ import { getSpeechModelPack } from '@src/lib/speech-model-pack-registry';
 import { createIndexedDbPronunciationArtifactStore } from '@src/lib/pronunciation-artifact-idb-store';
 import {
   cancelPronunciationPrepare,
+  discardPronunciationSession,
   fulfillAndSyncAudioQueue,
   playPronunciationArtifact,
   preparePronunciation,
@@ -63,6 +64,7 @@ import {
 import { savePendingSelection } from '@src/lib/pending-selection';
 import { openExtensionOptionsPage } from '@src/lib/open-extension-options';
 import { enqueueCardWithRequiredAudio } from '@src/lib/pronunciation-workflow';
+import { resolveAuthorizedPronunciationTranslationProvider } from '@src/lib/tts-provider-registry';
 
 const OFFSCREEN_URL = 'src/pages/offscreen/index.html';
 const OFFSCREEN_REASONS = [
@@ -70,7 +72,7 @@ const OFFSCREEN_REASONS = [
   'AUDIO_PLAYBACK' as chrome.offscreen.Reason,
 ];
 const OFFSCREEN_JUSTIFICATION =
-  'Run on-device Bergamot translation and Kokoro speech synthesis with local audio playback.';
+  'Run translation, local and remote speech synthesis, and pronunciation audio playback.';
 
 const modelPackStore = createModelPackStore(createChromeModelPackPersistence());
 const speechModelPackStore = createModelPackStore(createChromeSpeechModelPackPersistence());
@@ -186,23 +188,62 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 async function hasOffscreenDocument(): Promise<boolean> {
+  const runtime = chrome.runtime as typeof chrome.runtime & {
+    getContexts?: typeof chrome.runtime.getContexts;
+  };
+  if (!runtime.getContexts) {
+    return typeof document !== 'undefined' &&
+      document.querySelector(`iframe[src="${chrome.runtime.getURL(OFFSCREEN_URL)}"]`) !== null;
+  }
   const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_URL);
-  const contexts = await chrome.runtime.getContexts({
+  const contexts = await runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT'],
     documentUrls: [offscreenUrl],
   });
   return contexts.length > 0;
 }
 
-async function ensureOffscreenDocument(): Promise<void> {
-  if (await hasOffscreenDocument()) {
+let startingOffscreenDocument: Promise<void> | null = null;
+
+async function startOffscreenDocument(): Promise<void> {
+  const offscreen = (chrome as typeof chrome & { offscreen?: typeof chrome.offscreen }).offscreen;
+  if (offscreen?.createDocument) {
+    await offscreen.createDocument({
+      url: OFFSCREEN_URL,
+      reasons: OFFSCREEN_REASONS,
+      justification: OFFSCREEN_JUSTIFICATION,
+    });
     return;
   }
-  await chrome.offscreen.createDocument({
-    url: OFFSCREEN_URL,
-    reasons: OFFSCREEN_REASONS,
-    justification: OFFSCREEN_JUSTIFICATION,
-  });
+
+  // Firefox background scripts run in an extension document and can host the
+  // same browser-neutral runtime in a hidden frame.
+  if (typeof document !== 'undefined') {
+    const frame = document.createElement('iframe');
+    frame.src = chrome.runtime.getURL(OFFSCREEN_URL);
+    frame.hidden = true;
+    await new Promise<void>((resolve, reject) => {
+      frame.onload = () => resolve();
+      frame.onerror = () => reject(new Error('Could not start the pronunciation runtime.'));
+      document.documentElement.appendChild(frame);
+    });
+    return;
+  }
+
+  throw new Error('This browser cannot start the pronunciation runtime.');
+}
+
+async function ensureOffscreenDocument(): Promise<void> {
+  if (await hasOffscreenDocument()) return;
+  startingOffscreenDocument ??= startOffscreenDocument();
+  const pending = startingOffscreenDocument;
+  try {
+    await pending;
+  } finally {
+    if (startingOffscreenDocument === pending) {
+      startingOffscreenDocument = null;
+    }
+  }
 }
 
 async function sendToOffscreen(message: LltMessage): Promise<OffscreenResponse> {
@@ -434,9 +475,17 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
 
       if (message.type === 'llt.pronunciation.prepare') {
         try {
+          const configuredProvider = await getTranslationProvider();
           const state = await preparePronunciation(
-            message.requestId,
-            message.result,
+            {
+              ...message.input,
+              // Google is allowed only when both the active result and the
+              // current setting authorize the remote provider.
+              translationProvider: resolveAuthorizedPronunciationTranslationProvider(
+                message.input.translationProvider,
+                configuredProvider,
+              ),
+            },
             pronunciationRuntime,
           );
           sendResponse({
@@ -448,6 +497,9 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
             approxSizeBytes: state.approxSizeBytes,
             errorCode: state.errorCode,
             errorMessage: state.errorMessage,
+            providerId: state.providerId,
+            playbackKind: state.playbackKind,
+            pronunciationRequests: state.pronunciationRequests,
             pronunciationRequest: state.pronunciationRequest,
           } satisfies PronunciationPrepareResponse);
         } catch (err) {
@@ -463,6 +515,9 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
           type: 'llt.offscreen.abortSynthesize',
           requestId: message.requestId,
         }).catch(() => undefined);
+        if (message.discardSession) {
+          await discardPronunciationSession(message.requestId, pronunciationRuntime);
+        }
         sendResponse({ ok: true });
         return;
       }
@@ -493,22 +548,17 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
         try {
           const settings = await getAnkiSettings();
           const note = createAnkiNote(settings, message.content);
-          let itemId: string;
-          if (message.pronunciationRequest) {
-            const enqueued = await enqueueCardWithRequiredAudio(
-              ankiQueue,
-              {
-                note,
-                pronunciationRequest: message.pronunciationRequest,
-                artifactKey: message.artifactKey,
-              },
-              pronunciationArtifactStore,
-            );
-            itemId = enqueued.itemId;
-          } else {
-            const item = await ankiQueue.enqueue(note);
-            itemId = item.id;
-          }
+          const enqueued = await enqueueCardWithRequiredAudio(
+            ankiQueue,
+            {
+              note,
+              pronunciationRequests: message.pronunciationRequests,
+              pronunciationRequest: message.pronunciationRequest,
+              artifactKey: message.artifactKey,
+            },
+            pronunciationArtifactStore,
+          );
+          const itemId = enqueued.itemId;
 
           await updateAnkiQueueSyncAlarm();
           const syncResult = await syncQueuedAnkiCards();

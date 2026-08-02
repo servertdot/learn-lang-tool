@@ -222,6 +222,7 @@ export function TranslationPopover({
             {pronunciationState && (
               <PronunciationControl
                 state={pronunciationState}
+                contentLabel="original text"
                 approxSizeBytes={pronunciationApproxSizeBytes}
                 errorMessage={pronunciationError}
                 onPlay={onPlayPronunciation}

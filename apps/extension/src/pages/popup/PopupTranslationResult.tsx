@@ -104,6 +104,7 @@ export function PopupTranslationResult({
         {pronunciationState && (
           <PronunciationControl
             state={pronunciationState}
+            contentLabel="original text"
             approxSizeBytes={pronunciationApproxSizeBytes}
             errorMessage={pronunciationError}
             onPlay={onPlayPronunciation}

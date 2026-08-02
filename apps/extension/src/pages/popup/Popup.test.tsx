@@ -47,6 +47,24 @@ describe('PopupTranslationResult', () => {
     expect(html).toContain('aria-label="Play translated text"');
   });
 
+  it('names the original-text pronunciation action independently', () => {
+    const html = renderToStaticMarkup(
+      <PopupTranslationResult
+        result={result}
+        ankiState="idle"
+        ankiViewState="idle"
+        ankiError={null}
+        onAddToAnki={vi.fn()}
+        onViewInAnki={vi.fn()}
+        onOpenSettings={vi.fn()}
+        pronunciationState="ready"
+        onPlayPronunciation={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Play original text"');
+  });
+
   it('shows the View in Anki action after the card is added', () => {
     const html = renderToStaticMarkup(
       <PopupTranslationResult

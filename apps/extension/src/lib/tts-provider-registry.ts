@@ -9,6 +9,8 @@ import {
   getSpeechModelPacksForLanguage,
   type SpeechModelPackDescriptor,
 } from './speech-model-pack-registry';
+import type { TranslationProvider } from '@package/shared';
+import { buildGoogleTranslatePronunciationRequest } from './google-translate-tts-provider';
 
 export interface TtsProviderLanguageConfig {
   providerId: string;
@@ -87,4 +89,67 @@ export function requiredSpeechModelPack(
   const config = resolveTtsLanguageConfig(language);
   if (!config) return null;
   return getSpeechModelPacksForLanguage(config.language)[0] ?? null;
+}
+
+export type PronunciationPurpose = 'preview' | 'anki';
+
+/** Durable, provider-neutral representation of the authorized provider order. */
+export interface PronunciationPolicy {
+  pronunciationRequests: PronunciationRequest[];
+  allowWebSpeech: boolean;
+}
+
+export function buildPronunciationPolicy(input: {
+  text: string;
+  language: string;
+  translationProvider: TranslationProvider;
+  purpose: PronunciationPurpose;
+}): PronunciationPolicy {
+  const pronunciationRequests: PronunciationRequest[] = [];
+  if (input.translationProvider === 'google') {
+    pronunciationRequests.push(
+      buildGoogleTranslatePronunciationRequest({
+        text: input.text,
+        language: input.language,
+      }),
+    );
+  }
+
+  const kokoroConfig = resolveTtsLanguageConfig(input.language);
+  if (kokoroConfig) {
+    pronunciationRequests.push({
+      text: input.text,
+      language: kokoroConfig.language,
+      providerId: kokoroConfig.providerId,
+      providerRevision: kokoroConfig.providerRevision,
+      voiceId: kokoroConfig.defaultVoiceId,
+      speed: kokoroConfig.defaultSpeed,
+      encodingVersion: PRONUNCIATION_ENCODING_VERSION,
+    });
+  }
+
+  return {
+    pronunciationRequests,
+    allowWebSpeech: input.purpose === 'preview',
+  };
+}
+
+export function requiredSpeechModelPackForRequest(
+  request: PronunciationRequest,
+): SpeechModelPackDescriptor | null {
+  if (request.providerId !== 'kokoro') return null;
+  const config = resolveTtsLanguageConfig(request.language);
+  if (!config || config.providerRevision !== request.providerRevision) return null;
+  return getSpeechModelPacksForLanguage(config.language).find(
+    pack => pack.id === config.speechModelPackId,
+  ) ?? null;
+}
+
+export function resolveAuthorizedPronunciationTranslationProvider(
+  resultProvider: TranslationProvider,
+  configuredProvider: TranslationProvider,
+): TranslationProvider {
+  return resultProvider === 'google' && configuredProvider === 'google'
+    ? 'google'
+    : 'bergamot';
 }

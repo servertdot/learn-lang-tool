@@ -26,6 +26,7 @@ import {
 } from '@src/lib/messaging-anki';
 import type { AnkiQueueInfo } from '@src/lib/anki-queue';
 import type { AnkiDuplicateConflict } from '@src/lib/anki-queue-sync';
+import { translationProviderPrivacyCopy } from '@src/lib/translation-provider-privacy';
 import type { AnkiDuplicateDecision } from '@src/lib/extension-messages';
 import { AnkiDuplicateDialog } from '@src/components/AnkiDuplicateDialog';
 import type { LanguagePair, TranslationProvider } from '@package/shared';
@@ -424,9 +425,7 @@ export default function Options() {
                 <option value="bergamot">Bergamot — private and offline</option>
               </select>
               <p className="field-note">
-                {provider === 'google'
-                  ? 'Selected text is sent directly to translate.google.com. This is an unofficial endpoint and may be rate-limited or changed by Google.'
-                  : 'Selected text stays on this device. An offline model pack is required and translation quality may be lower.'}
+                {translationProviderPrivacyCopy(provider)}
               </p>
             </div>
 

@@ -52,4 +52,16 @@ describe('browser speech preview', () => {
 
     expect(speech.cancel).toHaveBeenCalledOnce();
   });
+
+  it('settles active playback when the pronunciation request is cancelled', async () => {
+    const { scope, speech } = createSpeechWindow();
+    speech.speak.mockImplementation(() => undefined);
+    const controller = new AbortController();
+
+    const playback = speakWithBrowser('hola', 'es', scope, controller.signal);
+    controller.abort();
+
+    await expect(playback).resolves.toBeUndefined();
+    expect(speech.cancel).toHaveBeenCalledTimes(2);
+  });
 });

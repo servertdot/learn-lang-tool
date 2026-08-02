@@ -22,11 +22,14 @@ export interface AnkiQueueItem {
   lastError?: string;
   /** Present on all newly created items; absent/legacy for pre-audio queue entries. */
   audioStatus?: AnkiQueueAudioStatus;
+  pronunciationRequests?: PronunciationRequest[];
+  /** Legacy single-candidate representation. */
   pronunciationRequest?: PronunciationRequest;
   artifactKey?: string;
 }
 
 export interface AnkiQueueEnqueueOptions {
+  pronunciationRequests?: PronunciationRequest[];
   pronunciationRequest?: PronunciationRequest;
   artifactKey?: string;
   audioStatus?: AnkiQueueAudioStatus;
@@ -108,7 +111,11 @@ function parseQueue(value: unknown): AnkiQueueItem[] {
     }
 
     // Pre-audio queue entries remain syncable as text-only.
-    if (candidate.audioStatus === undefined && candidate.pronunciationRequest === undefined) {
+    if (
+      candidate.audioStatus === undefined &&
+      candidate.pronunciationRequests === undefined &&
+      candidate.pronunciationRequest === undefined
+    ) {
       return [
         {
           id: candidate.id,
@@ -124,6 +131,10 @@ function parseQueue(value: unknown): AnkiQueueItem[] {
       candidate.audioStatus === undefined ||
       !AUDIO_STATUSES.has(candidate.audioStatus) ||
       (candidate.artifactKey !== undefined && typeof candidate.artifactKey !== 'string') ||
+      (candidate.pronunciationRequests !== undefined &&
+        (!Array.isArray(candidate.pronunciationRequests) ||
+          candidate.pronunciationRequests.length === 0 ||
+          !candidate.pronunciationRequests.every(isPronunciationRequest))) ||
       (candidate.pronunciationRequest !== undefined &&
         !isPronunciationRequest(candidate.pronunciationRequest))
     ) {
@@ -137,6 +148,7 @@ function parseQueue(value: unknown): AnkiQueueItem[] {
         note: candidate.note,
         lastError: candidate.lastError,
         audioStatus: candidate.audioStatus,
+        pronunciationRequests: candidate.pronunciationRequests?.map(request => ({ ...request })),
         pronunciationRequest: candidate.pronunciationRequest,
         artifactKey: candidate.artifactKey,
       },
@@ -156,6 +168,7 @@ function cloneItem(item: AnkiQueueItem): AnkiQueueItem {
     pronunciationRequest: item.pronunciationRequest
       ? { ...item.pronunciationRequest }
       : undefined,
+    pronunciationRequests: item.pronunciationRequests?.map(request => ({ ...request })),
   };
 }
 
@@ -200,7 +213,9 @@ export class AnkiQueue {
     return this.exclusive(async () => {
       const items = parseQueue(await this.storage.read());
       const id = this.createId();
-      const requiresAudio = options.pronunciationRequest !== undefined;
+      const requests = options.pronunciationRequests ??
+        (options.pronunciationRequest ? [options.pronunciationRequest] : undefined);
+      const requiresAudio = requests !== undefined && requests.length > 0;
       const item: AnkiQueueItem = {
         id,
         createdAt: this.now(),
@@ -217,7 +232,9 @@ export class AnkiQueue {
               ? 'ready_to_sync'
               : 'waiting_for_audio'
             : 'legacy_text_only'),
-        pronunciationRequest: options.pronunciationRequest,
+        pronunciationRequests: options.pronunciationRequests?.map(request => ({ ...request })),
+        pronunciationRequest:
+          options.pronunciationRequests === undefined ? options.pronunciationRequest : undefined,
         artifactKey: options.artifactKey,
       };
       await this.storage.write([...items, item]);

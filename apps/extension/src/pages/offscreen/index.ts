@@ -6,6 +6,7 @@ import {
 } from '@src/lib/bergamot-engine';
 import { translateWithStub } from '@src/lib/translation-stub';
 import { createKokoroAudioTtsProvider } from '@src/lib/kokoro-tts-provider';
+import { createGoogleTranslateTtsProvider } from '@src/lib/google-translate-tts-provider';
 import { bytesToBase64 } from '@src/lib/pronunciation-artifact-store';
 import { TtsError } from '@src/lib/audio-tts-provider';
 import { lltError, lltLog } from '@src/lib/debug-log';
@@ -20,11 +21,18 @@ const SYNTHESIZE_TIMEOUT_MS = 120_000;
 const translateAborts = new Map<string, AbortController>();
 const synthesizeAborts = new Map<string, AbortController>();
 const kokoroProvider = createKokoroAudioTtsProvider();
+const googleTranslateTtsProvider = createGoogleTranslateTtsProvider();
+const ttsProviders = new Map(
+  [kokoroProvider, googleTranslateTtsProvider].map(provider => [provider.id, provider]),
+);
 
 let activeAudio: HTMLAudioElement | null = null;
 let activeObjectUrl: string | null = null;
+let settleActivePlayback: (() => void) | null = null;
 
 function stopPlayback(): void {
+  const settle = settleActivePlayback;
+  settleActivePlayback = null;
   if (activeAudio) {
     activeAudio.pause();
     activeAudio.src = '';
@@ -34,6 +42,7 @@ function stopPlayback(): void {
     URL.revokeObjectURL(activeObjectUrl);
     activeObjectUrl = null;
   }
+  settle?.();
 }
 
 function playBase64Audio(dataBase64: string, mimeType: string): Promise<void> {
@@ -50,17 +59,32 @@ function playBase64Audio(dataBase64: string, mimeType: string): Promise<void> {
   activeAudio = audio;
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      settleActivePlayback = null;
+      if (activeAudio === audio) {
+        activeAudio = null;
+        audio.pause();
+        audio.src = '';
+      }
+      if (activeObjectUrl === url) {
+        activeObjectUrl = null;
+        URL.revokeObjectURL(url);
+      }
+      if (error) reject(error);
+      else resolve();
+    };
+    settleActivePlayback = () => finish();
     audio.onended = () => {
-      stopPlayback();
-      resolve();
+      finish();
     };
     audio.onerror = () => {
-      stopPlayback();
-      reject(new Error('Audio playback failed.'));
+      finish(new Error('Audio playback failed.'));
     };
     void audio.play().catch(error => {
-      stopPlayback();
-      reject(error instanceof Error ? error : new Error('Audio playback failed.'));
+      finish(error instanceof Error ? error : new Error('Audio playback failed.'));
     });
   });
 }
@@ -107,6 +131,7 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
         const { requestId, pronunciationRequest } = message;
         lltLog('offscreen', 'synthesize →', {
           requestId,
+          providerId: pronunciationRequest.providerId,
           language: pronunciationRequest.language,
           textLen: pronunciationRequest.text.length,
         });
@@ -117,7 +142,14 @@ chrome.runtime.onMessage.addListener((message: LltMessage, _sender, sendResponse
 
         try {
           const started = performance.now();
-          const artifact = await kokoroProvider.synthesize(
+          const provider = ttsProviders.get(pronunciationRequest.providerId);
+          if (!provider || provider.revision !== pronunciationRequest.providerRevision) {
+            throw new TtsError(
+              'generation_failed',
+              'The queued pronunciation provider revision is unavailable.',
+            );
+          }
+          const artifact = await provider.synthesize(
             pronunciationRequest,
             controller.signal,
           );

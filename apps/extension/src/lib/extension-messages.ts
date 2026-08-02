@@ -61,6 +61,9 @@ export type PronunciationPrepareResponse =
       approxSizeBytes?: number;
       errorCode?: string;
       errorMessage?: string;
+      providerId?: string;
+      playbackKind?: import('./pronunciation-workflow').PronunciationPlaybackKind;
+      pronunciationRequests?: import('./audio-tts-provider').PronunciationRequest[];
       pronunciationRequest?: import('./audio-tts-provider').PronunciationRequest;
     }
   | { ok: false; error: string };
@@ -114,15 +117,15 @@ export type LltMessage =
     }
   | {
       type: 'llt.pronunciation.prepare';
-      requestId: string;
-      result: TranslateResponse;
+      input: import('./pronunciation-workflow').PronunciationWorkflowInput;
     }
-  | { type: 'llt.pronunciation.cancel'; requestId: string }
+  | { type: 'llt.pronunciation.cancel'; requestId: string; discardSession?: boolean }
   | { type: 'llt.pronunciation.play'; artifactKey: string }
   | { type: 'llt.pronunciation.stop' }
   | {
       type: 'llt.anki.addNote';
       content: AnkiCardContent;
+      pronunciationRequests?: import('./audio-tts-provider').PronunciationRequest[];
       pronunciationRequest?: import('./audio-tts-provider').PronunciationRequest;
       artifactKey?: string;
     }

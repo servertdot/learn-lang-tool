@@ -31,7 +31,7 @@ describe('TranslationPopover', () => {
     expect(html).toContain('aria-label="Added to Anki"');
     expect(html).toContain('aria-label="View added note in Anki"');
     expect(html).toContain('aria-label="Open settings"');
-    expect(html).toContain('aria-label="Play pronunciation"');
+    expect(html).toContain('aria-label="Play original text"');
     expect(html).toContain('aria-label="Play translated text"');
     expect(html).toContain('Translation');
     expect(html).toContain('Original');
@@ -61,7 +61,7 @@ describe('TranslationPopover', () => {
     );
 
     expect(html).toContain('Preparing audio…');
-    expect(html).toContain('aria-label="Preparing pronunciation"');
+    expect(html).toContain('aria-label="Preparing original text"');
   });
 
   it('explains that a card is safely queued while Anki is closed', () => {

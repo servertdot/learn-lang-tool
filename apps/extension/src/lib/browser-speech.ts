@@ -22,6 +22,7 @@ export function speakWithBrowser(
   text: string,
   language: string,
   scope: Window = window,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!canUseBrowserSpeech(scope)) {
     return Promise.reject(new Error('Speech playback is unavailable in this browser.'));
@@ -38,21 +39,37 @@ export function speakWithBrowser(
   utterance.lang = language;
   if (matchingVoice) utterance.voice = matchingVoice;
 
+  if (signal?.aborted) return Promise.resolve();
+
   return new Promise((resolve, reject) => {
-    utterance.onend = () => resolve();
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', cancel);
+      if (error) reject(error);
+      else resolve();
+    };
+    const cancel = () => {
+      speech.cancel();
+      finish();
+    };
+    signal?.addEventListener('abort', cancel, { once: true });
+
+    utterance.onend = () => finish();
     utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
       if (event.error === 'canceled' || event.error === 'interrupted') {
-        resolve();
+        finish();
         return;
       }
-      reject(new Error('Could not play the translated text.'));
+      finish(new Error('Could not play the translated text.'));
     };
 
     try {
       speech.cancel();
       speech.speak(utterance);
     } catch (error) {
-      reject(error instanceof Error ? error : new Error('Could not play the translated text.'));
+      finish(error instanceof Error ? error : new Error('Could not play the translated text.'));
     }
   });
 }

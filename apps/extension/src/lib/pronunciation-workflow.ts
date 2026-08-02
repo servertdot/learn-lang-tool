@@ -1,4 +1,4 @@
-import type { TranslateResponse } from '@package/shared';
+import type { TranslateResponse, TranslationProvider } from '@package/shared';
 import {
   computeArtifactIdentity,
   TtsError,
@@ -7,9 +7,13 @@ import {
   type PronunciationRequest,
 } from './audio-tts-provider';
 import type { AnkiQueue } from './anki-queue';
-import type { PronunciationArtifactStore } from './pronunciation-artifact-store';
-import { buildPronunciationRequest, requiredSpeechModelPack } from './tts-provider-registry';
 import type { ModelPackStatus } from './model-pack-store';
+import type { PronunciationArtifactStore } from './pronunciation-artifact-store';
+import {
+  buildPronunciationPolicy,
+  requiredSpeechModelPackForRequest,
+  type PronunciationPurpose,
+} from './tts-provider-registry';
 
 export type PronunciationUiState =
   | 'pack_missing'
@@ -20,155 +24,279 @@ export type PronunciationUiState =
   | 'failed'
   | 'unsupported';
 
+export type PronunciationPlaybackKind = 'artifact' | 'web_speech';
+
 export interface PronunciationSessionState {
   requestId: string;
   uiState: PronunciationUiState;
+  pronunciationRequests?: PronunciationRequest[];
+  /** Compatibility field for callers and legacy queue items that carry one request. */
   pronunciationRequest?: PronunciationRequest;
   artifactKey?: string;
+  providerId?: string;
+  playbackKind?: PronunciationPlaybackKind;
   errorCode?: string;
   errorMessage?: string;
   speechModelPackId?: string;
   approxSizeBytes?: number;
 }
 
+export interface PronunciationWorkflowInput {
+  requestId: string;
+  text: string;
+  language: string;
+  translationProvider: TranslationProvider;
+  purpose: PronunciationPurpose;
+  /** Preview retry cursor after a provider's playback-start failure. */
+  excludedProviderIds?: readonly string[];
+}
+
 export interface PronunciationWorkflowDependencies {
-  ttsProvider: AudioTtsProvider;
   artifactStore: PronunciationArtifactStore;
   getSpeechPackStatus(packId: string): Promise<ModelPackStatus>;
-  synthesize?(
+  synthesize(
     request: PronunciationRequest,
     signal?: AbortSignal,
   ): Promise<PronunciationArtifact>;
+  playArtifact?(artifactKey: string, signal: AbortSignal): Promise<void>;
+  playWebSpeech?(text: string, language: string, signal: AbortSignal): Promise<void>;
+  /** Retained while old adapters migrate to the provider-neutral synthesize capability. */
+  ttsProvider?: AudioTtsProvider;
+}
+
+function requestListState(
+  input: PronunciationWorkflowInput,
+  requests: readonly PronunciationRequest[],
+): Pick<PronunciationSessionState, 'requestId' | 'pronunciationRequests' | 'pronunciationRequest'> {
+  return {
+    requestId: input.requestId,
+    pronunciationRequests: requests.map(request => ({ ...request })),
+    pronunciationRequest: requests[0] ? { ...requests[0] } : undefined,
+  };
+}
+
+function isCancellation(error: unknown, signal?: AbortSignal): boolean {
+  return (
+    signal?.aborted === true ||
+    (error instanceof TtsError && error.code === 'request_cancelled') ||
+    (error instanceof DOMException && error.name === 'AbortError')
+  );
+}
+
+function failureMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return 'Pronunciation provider failed.';
 }
 
 /**
- * High-level pronunciation preparation for a translation result.
- * Stale completions for a superseded requestId are ignored by the caller.
+ * High-level pronunciation seam. It owns the authorized provider order,
+ * whole-text fallback, model-pack eligibility, artifact reuse, and preview playback.
  */
-export async function preparePronunciationForResult(
+export async function runPronunciationWorkflow(
+  input: PronunciationWorkflowInput,
+  dependencies: PronunciationWorkflowDependencies,
+  signal?: AbortSignal,
+): Promise<PronunciationSessionState> {
+  let policy;
+  try {
+    policy = buildPronunciationPolicy(input);
+  } catch (error) {
+    return {
+      requestId: input.requestId,
+      uiState: 'unsupported',
+      errorCode: error instanceof TtsError ? error.code : 'language_unsupported',
+      errorMessage: failureMessage(error),
+    };
+  }
+
+  const authorizedRequests = policy.pronunciationRequests;
+  const excludedProviders = new Set(input.excludedProviderIds ?? []);
+  const requests = authorizedRequests.filter(request => !excludedProviders.has(request.providerId));
+  const stateBase = requestListState(input, authorizedRequests);
+  const playbackSignal = signal ?? new AbortController().signal;
+  let lastError: unknown;
+
+  for (const request of requests) {
+    if (signal?.aborted) {
+      return {
+        ...stateBase,
+        uiState: 'stopped',
+        errorCode: 'request_cancelled',
+      };
+    }
+
+    const speechPack = requiredSpeechModelPackForRequest(request);
+    if (speechPack) {
+      const status = await dependencies.getSpeechPackStatus(speechPack.id);
+      if (signal?.aborted) {
+        return {
+          ...stateBase,
+          uiState: 'stopped',
+          providerId: request.providerId,
+          errorCode: 'request_cancelled',
+        };
+      }
+      if (status !== 'ready') {
+        if (input.purpose === 'anki') {
+          return {
+            ...stateBase,
+            uiState: 'pack_missing',
+            providerId: request.providerId,
+            speechModelPackId: speechPack.id,
+            approxSizeBytes: speechPack.approxSizeBytes,
+            errorCode: 'model_pack_missing',
+            errorMessage: 'A compatible speech model pack is required for Anki audio.',
+          };
+        }
+        continue;
+      }
+    }
+
+    const identity = await computeArtifactIdentity(request);
+    try {
+      if (signal?.aborted) throw new TtsError('request_cancelled', 'Pronunciation was stopped.');
+      let artifactKey = identity.artifactKey;
+      const existing = await dependencies.artifactStore.get(artifactKey);
+      if (signal?.aborted) throw new TtsError('request_cancelled', 'Pronunciation was stopped.');
+      if (existing) {
+        await dependencies.artifactStore.touch(artifactKey);
+      } else {
+        const artifact = await dependencies.synthesize(request, signal);
+        const stored: PronunciationArtifact = {
+          ...artifact,
+          artifactKey,
+          filename: artifact.filename || identity.filename,
+        };
+        await dependencies.artifactStore.put(stored);
+        artifactKey = stored.artifactKey;
+      }
+
+      if (input.purpose === 'preview' && dependencies.playArtifact) {
+        await dependencies.playArtifact(artifactKey, playbackSignal);
+        return {
+          ...stateBase,
+          uiState: 'stopped',
+          artifactKey,
+          providerId: request.providerId,
+          playbackKind: 'artifact',
+        };
+      }
+
+      return {
+        ...stateBase,
+        uiState: 'ready',
+        artifactKey,
+        providerId: request.providerId,
+        playbackKind: 'artifact',
+        speechModelPackId: speechPack?.id,
+      };
+    } catch (error) {
+      if (isCancellation(error, signal)) {
+        return {
+          ...stateBase,
+          uiState: 'stopped',
+          providerId: request.providerId,
+          errorCode: 'request_cancelled',
+          errorMessage: 'Pronunciation was stopped.',
+        };
+      }
+      lastError = error;
+    }
+  }
+
+  if (policy.allowWebSpeech) {
+    try {
+      if (dependencies.playWebSpeech) {
+        await dependencies.playWebSpeech(input.text, input.language, playbackSignal);
+        return {
+          ...stateBase,
+          uiState: 'stopped',
+          providerId: 'web-speech',
+          playbackKind: 'web_speech',
+        };
+      }
+      return {
+        ...stateBase,
+        uiState: 'ready',
+        providerId: 'web-speech',
+        playbackKind: 'web_speech',
+      };
+    } catch (error) {
+      if (isCancellation(error, signal)) {
+        return {
+          ...stateBase,
+          uiState: 'stopped',
+          providerId: 'web-speech',
+          errorCode: 'request_cancelled',
+          errorMessage: 'Pronunciation was stopped.',
+        };
+      }
+      lastError = error;
+    }
+  }
+
+  if (requests.length === 0 && !policy.allowWebSpeech) {
+    return {
+      ...stateBase,
+      uiState: 'unsupported',
+      errorCode: 'language_unsupported',
+      errorMessage: 'No artifact-capable speech provider supports this language.',
+    };
+  }
+
+  return {
+    ...stateBase,
+    uiState: 'failed',
+    errorCode: lastError instanceof TtsError ? lastError.code : 'generation_failed',
+    errorMessage: failureMessage(lastError),
+  };
+}
+
+/** Compatibility wrapper for the eager original-text Anki preparation path. */
+export function preparePronunciationForResult(
   result: TranslateResponse,
   requestId: string,
   dependencies: PronunciationWorkflowDependencies,
   signal?: AbortSignal,
+  translationProvider: TranslationProvider = 'bergamot',
 ): Promise<PronunciationSessionState> {
-  let pronunciationRequest: PronunciationRequest;
-  try {
-    pronunciationRequest = buildPronunciationRequest({
+  return runPronunciationWorkflow(
+    {
+      requestId,
       text: result.source_text,
       language: result.from_code,
-    });
-  } catch (error) {
-    if (error instanceof TtsError && error.code === 'language_unsupported') {
-      return {
-        requestId,
-        uiState: 'unsupported',
-        errorCode: error.code,
-        errorMessage: error.message,
-      };
-    }
-    throw error;
-  }
-
-  const pack = requiredSpeechModelPack(pronunciationRequest.language);
-  if (!pack) {
-    return {
-      requestId,
-      uiState: 'unsupported',
-      pronunciationRequest,
-      errorCode: 'language_unsupported',
-      errorMessage: 'No speech model pack is configured for this language.',
-    };
-  }
-
-  const packStatus = await dependencies.getSpeechPackStatus(pack.id);
-  if (packStatus !== 'ready') {
-    return {
-      requestId,
-      uiState: 'pack_missing',
-      pronunciationRequest,
-      speechModelPackId: pack.id,
-      approxSizeBytes: pack.approxSizeBytes,
-    };
-  }
-
-  const { artifactKey, filename } = await computeArtifactIdentity(pronunciationRequest);
-  const existing = await dependencies.artifactStore.get(artifactKey);
-  if (existing) {
-    await dependencies.artifactStore.touch(artifactKey);
-    return {
-      requestId,
-      uiState: 'ready',
-      pronunciationRequest,
-      artifactKey,
-      speechModelPackId: pack.id,
-    };
-  }
-
-  if (signal?.aborted) {
-    throw new TtsError('request_cancelled', 'Pronunciation preparation was cancelled.');
-  }
-
-  const synthesize = dependencies.synthesize ?? ((req, sig) => dependencies.ttsProvider.synthesize(req, sig));
-
-  try {
-    const artifact = await synthesize(pronunciationRequest, signal);
-    const stored: PronunciationArtifact = {
-      ...artifact,
-      artifactKey,
-      filename: artifact.filename || filename,
-    };
-    await dependencies.artifactStore.put(stored);
-    return {
-      requestId,
-      uiState: 'ready',
-      pronunciationRequest,
-      artifactKey,
-      speechModelPackId: pack.id,
-    };
-  } catch (error) {
-    if (error instanceof TtsError) {
-      return {
-        requestId,
-        uiState: 'failed',
-        pronunciationRequest,
-        speechModelPackId: pack.id,
-        errorCode: error.code,
-        errorMessage: error.message,
-      };
-    }
-    const message = error instanceof Error ? error.message : 'Speech generation failed.';
-    return {
-      requestId,
-      uiState: 'failed',
-      pronunciationRequest,
-      speechModelPackId: pack.id,
-      errorCode: 'generation_failed',
-      errorMessage: message,
-    };
-  }
+      translationProvider,
+      purpose: 'anki',
+    },
+    dependencies,
+    signal,
+  );
 }
 
 export interface EnqueueCardWithAudioInput {
   note: Parameters<AnkiQueue['enqueue']>[0];
-  pronunciationRequest: PronunciationRequest;
+  pronunciationRequests?: PronunciationRequest[];
+  pronunciationRequest?: PronunciationRequest;
   artifactKey?: string;
 }
 
-/**
- * Queue-first add: persists the note and pronunciation request, then the caller
- * may continue preparation / sync. Never silently omits required audio.
- */
+/** Queue-first add. A post-feature item is never downgraded to text-only. */
 export async function enqueueCardWithRequiredAudio(
   queue: AnkiQueue,
   input: EnqueueCardWithAudioInput,
   artifactStore?: PronunciationArtifactStore,
 ): Promise<{ itemId: string; audioStatus: string }> {
+  const requests = input.pronunciationRequests ??
+    (input.pronunciationRequest ? [input.pronunciationRequest] : []);
+  if (requests.length === 0) {
+    throw new TtsError('language_unsupported', 'No pronunciation provider is authorized.');
+  }
   if (input.artifactKey && artifactStore) {
     await artifactStore.pin(input.artifactKey);
   }
 
   const item = await queue.enqueue(input.note, {
-    pronunciationRequest: input.pronunciationRequest,
+    pronunciationRequests: requests,
     artifactKey: input.artifactKey,
     audioStatus: input.artifactKey ? 'ready_to_sync' : 'waiting_for_audio',
   });
@@ -176,9 +304,7 @@ export async function enqueueCardWithRequiredAudio(
   return { itemId: item.id, audioStatus: item.audioStatus ?? 'waiting_for_audio' };
 }
 
-/**
- * Resume audio generation for queued cards that are waiting for pronunciation.
- */
+/** Resume ordered artifact generation for queued cards after page or browser restart. */
 export async function fulfillQueuedPronunciation(
   queue: AnkiQueue,
   dependencies: PronunciationWorkflowDependencies,
@@ -186,39 +312,46 @@ export async function fulfillQueuedPronunciation(
 ): Promise<void> {
   const items = await queue.list();
   for (const item of items) {
-    if (
-      (item.audioStatus !== 'waiting_for_audio' && item.audioStatus !== 'audio_failed') ||
-      !item.pronunciationRequest
-    ) {
+    if (item.audioStatus !== 'waiting_for_audio' && item.audioStatus !== 'audio_failed') {
       continue;
     }
+    const requests = item.pronunciationRequests ??
+      (item.pronunciationRequest ? [item.pronunciationRequest] : []);
+    if (requests.length === 0) continue;
 
-    const { artifactKey, filename } = await computeArtifactIdentity(item.pronunciationRequest);
-    const existing = await dependencies.artifactStore.get(artifactKey);
-    if (existing) {
-      await dependencies.artifactStore.pin(artifactKey);
-      await queue.setAudioReady(item.id, artifactKey);
-      continue;
+    let lastError = 'Pronunciation audio generation failed.';
+    let fulfilled = false;
+    for (const request of requests) {
+      if (signal?.aborted) return;
+      const speechPack = requiredSpeechModelPackForRequest(request);
+      if (speechPack && (await dependencies.getSpeechPackStatus(speechPack.id)) !== 'ready') {
+        lastError = `Speech model pack ${speechPack.id} is not installed.`;
+        continue;
+      }
+
+      const { artifactKey, filename } = await computeArtifactIdentity(request);
+      try {
+        const existing = await dependencies.artifactStore.get(artifactKey);
+        if (existing) {
+          await dependencies.artifactStore.pin(artifactKey);
+        } else {
+          const artifact = await dependencies.synthesize(request, signal);
+          await dependencies.artifactStore.put(
+            { ...artifact, artifactKey, filename: artifact.filename || filename },
+            { pinned: true },
+          );
+        }
+        await queue.setAudioReady(item.id, artifactKey);
+        fulfilled = true;
+        break;
+      } catch (error) {
+        if (isCancellation(error, signal)) return;
+        lastError = failureMessage(error);
+      }
     }
 
-    const synthesize =
-      dependencies.synthesize ?? ((req, sig) => dependencies.ttsProvider.synthesize(req, sig));
-
-    try {
-      const artifact = await synthesize(item.pronunciationRequest, signal);
-      await dependencies.artifactStore.put(
-        { ...artifact, artifactKey, filename: artifact.filename || filename },
-        { pinned: true },
-      );
-      await queue.setAudioReady(item.id, artifactKey);
-    } catch (error) {
-      const message =
-        error instanceof TtsError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'Speech generation failed.';
-      await queue.setAudioFailed(item.id, message);
+    if (!fulfilled) {
+      await queue.setAudioFailed(item.id, lastError);
     }
   }
 }

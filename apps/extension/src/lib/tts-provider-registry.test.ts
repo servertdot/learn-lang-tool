@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TtsError } from './audio-tts-provider';
 import {
   buildPronunciationRequest,
+  resolveAuthorizedPronunciationTranslationProvider,
   requiredSpeechModelPack,
   resolveTtsLanguageConfig,
 } from './tts-provider-registry';
@@ -45,5 +46,15 @@ describe('tts provider language registry', () => {
 
   it('selects the Kokoro English speech model pack', () => {
     expect(requiredSpeechModelPack('en')?.id).toBe('kokoro-en-v1.0');
+  });
+
+  it('requires both the active result and current setting to authorize Google speech', () => {
+    expect(resolveAuthorizedPronunciationTranslationProvider('google', 'google')).toBe('google');
+    expect(resolveAuthorizedPronunciationTranslationProvider('google', 'bergamot')).toBe(
+      'bergamot',
+    );
+    expect(resolveAuthorizedPronunciationTranslationProvider('bergamot', 'google')).toBe(
+      'bergamot',
+    );
   });
 });

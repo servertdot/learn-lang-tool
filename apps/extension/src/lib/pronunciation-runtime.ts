@@ -1,15 +1,15 @@
-import type { TranslateResponse } from '@package/shared';
 import { getAnkiAudioFieldNames, type AnkiCardContent, type AnkiSettings } from './anki';
 import type { AnkiConnectAudioAttachment } from './anki-connect';
 import type { AnkiQueue } from './anki-queue';
-import type { PronunciationRequest } from './audio-tts-provider';
+import { TtsError, type PronunciationRequest } from './audio-tts-provider';
 import { base64ToBytes, bytesToBase64 } from './pronunciation-artifact-store';
 import type { PronunciationArtifactStore } from './pronunciation-artifact-store';
 import {
   enqueueCardWithRequiredAudio,
   fulfillQueuedPronunciation,
-  preparePronunciationForResult,
+  runPronunciationWorkflow,
   type PronunciationSessionState,
+  type PronunciationWorkflowInput,
 } from './pronunciation-workflow';
 import type { ModelPackStore } from './model-pack-store';
 import { getSpeechModelPack } from './speech-model-pack-registry';
@@ -24,78 +24,84 @@ export interface PronunciationRuntimeDependencies {
 }
 
 const prepareAborts = new Map<string, AbortController>();
+const previewArtifactKeys = new Map<string, Set<string>>();
+
+async function synthesizeThroughOffscreen(
+  requestId: string,
+  request: PronunciationRequest,
+  dependencies: PronunciationRuntimeDependencies,
+  signal?: AbortSignal,
+) {
+  await dependencies.ensureOffscreenDocument();
+  const response = await dependencies.sendToOffscreen({
+    type: 'llt.offscreen.synthesize',
+    requestId,
+    pronunciationRequest: request,
+  });
+  if (signal?.aborted) {
+    throw new TtsError('request_cancelled', 'Pronunciation preparation was cancelled.');
+  }
+  if (!response.ok || !('artifact' in response) || !response.artifact) {
+    const message =
+      ('error' in response && typeof response.error === 'string' ? response.error : null) ??
+      'Speech generation failed.';
+    if ('code' in response && response.code === 'request_cancelled') {
+      throw new TtsError('request_cancelled', message);
+    }
+    throw new TtsError('generation_failed', message);
+  }
+  const artifact = response.artifact as {
+    artifactKey: string;
+    filename: string;
+    dataBase64: string;
+    mimeType: string;
+    extension: string;
+    sampleRate: number;
+    language: string;
+    voiceId: string;
+    speed: number;
+  };
+  return {
+    artifactKey: artifact.artifactKey,
+    filename: artifact.filename,
+    bytes: base64ToBytes(artifact.dataBase64),
+    mimeType: artifact.mimeType,
+    extension: artifact.extension,
+    sampleRate: artifact.sampleRate,
+    language: artifact.language,
+    voiceId: artifact.voiceId,
+    speed: artifact.speed,
+  };
+}
 
 export async function preparePronunciation(
-  requestId: string,
-  result: TranslateResponse,
+  input: PronunciationWorkflowInput,
   dependencies: PronunciationRuntimeDependencies,
 ): Promise<PronunciationSessionState> {
-  prepareAborts.get(requestId)?.abort();
+  prepareAborts.get(input.requestId)?.abort();
   const controller = new AbortController();
-  prepareAborts.set(requestId, controller);
+  prepareAborts.set(input.requestId, controller);
 
   try {
-    return await preparePronunciationForResult(
-      result,
-      requestId,
+    const state = await runPronunciationWorkflow(
+      input,
       {
-        ttsProvider: {
-          id: 'kokoro',
-          revision: 'v1.0',
-          supportsLanguage: () => true,
-          requiredModelPackIds: () => [],
-          synthesize: async () => {
-            throw new Error('synthesize must go through offscreen');
-          },
-        },
         artifactStore: dependencies.artifactStore,
         getSpeechPackStatus: packId => dependencies.speechPackStore.getStatus(packId),
-        synthesize: async (request, signal) => {
-          await dependencies.ensureOffscreenDocument();
-          const response = await dependencies.sendToOffscreen({
-            type: 'llt.offscreen.synthesize',
-            requestId,
-            pronunciationRequest: request,
-          });
-          if (signal?.aborted) {
-            throw new DOMException('Aborted', 'AbortError');
-          }
-          if (!response.ok || !('artifact' in response) || !response.artifact) {
-            throw new Error(
-              ('error' in response && typeof response.error === 'string'
-                ? response.error
-                : null) ?? 'Speech generation failed.',
-            );
-          }
-          const artifact = response.artifact as {
-            artifactKey: string;
-            filename: string;
-            dataBase64: string;
-            mimeType: string;
-            extension: string;
-            sampleRate: number;
-            language: string;
-            voiceId: string;
-            speed: number;
-          };
-          return {
-            artifactKey: artifact.artifactKey,
-            filename: artifact.filename,
-            bytes: base64ToBytes(artifact.dataBase64),
-            mimeType: artifact.mimeType,
-            extension: artifact.extension,
-            sampleRate: artifact.sampleRate,
-            language: artifact.language,
-            voiceId: artifact.voiceId,
-            speed: artifact.speed,
-          };
-        },
+        synthesize: (request, signal) =>
+          synthesizeThroughOffscreen(input.requestId, request, dependencies, signal),
       },
       controller.signal,
     );
+    if (state.artifactKey) {
+      const keys = previewArtifactKeys.get(input.requestId) ?? new Set<string>();
+      keys.add(state.artifactKey);
+      previewArtifactKeys.set(input.requestId, keys);
+    }
+    return state;
   } finally {
-    if (prepareAborts.get(requestId) === controller) {
-      prepareAborts.delete(requestId);
+    if (prepareAborts.get(input.requestId) === controller) {
+      prepareAborts.delete(input.requestId);
     }
   }
 }
@@ -103,6 +109,22 @@ export async function preparePronunciation(
 export function cancelPronunciationPrepare(requestId: string): void {
   prepareAborts.get(requestId)?.abort();
   prepareAborts.delete(requestId);
+}
+
+export async function discardPronunciationSession(
+  requestId: string,
+  dependencies: PronunciationRuntimeDependencies,
+): Promise<void> {
+  cancelPronunciationPrepare(requestId);
+  const artifactKeys = previewArtifactKeys.get(requestId);
+  previewArtifactKeys.delete(requestId);
+  if (!artifactKeys) return;
+  for (const artifactKey of artifactKeys) {
+    const entry = await dependencies.artifactStore.get(artifactKey);
+    if (entry && !entry.pinned) {
+      await dependencies.artifactStore.delete(artifactKey);
+    }
+  }
 }
 
 export async function playPronunciationArtifact(
@@ -141,6 +163,7 @@ export async function enqueueAnkiWithPronunciation(
   settings: AnkiSettings,
   content: AnkiCardContent,
   options: {
+    pronunciationRequests?: PronunciationRequest[];
     pronunciationRequest?: PronunciationRequest;
     artifactKey?: string;
   },
@@ -150,14 +173,11 @@ export async function enqueueAnkiWithPronunciation(
   artifactStore: PronunciationArtifactStore,
 ): Promise<{ itemId: string; audioStatus: string }> {
   const note = createNote(settings, content);
-  if (!options.pronunciationRequest) {
-    const item = await queue.enqueue(note);
-    return { itemId: item.id, audioStatus: item.audioStatus ?? 'legacy_text_only' };
-  }
   return enqueueCardWithRequiredAudio(
     queue,
     {
       note,
+      pronunciationRequests: options.pronunciationRequests,
       pronunciationRequest: options.pronunciationRequest,
       artifactKey: options.artifactKey,
     },
@@ -179,58 +199,10 @@ export async function fulfillAndSyncAudioQueue(
   dependencies: PronunciationRuntimeDependencies,
 ): Promise<void> {
   await fulfillQueuedPronunciation(dependencies.ankiQueue, {
-    ttsProvider: {
-      id: 'kokoro',
-      revision: 'v1.0',
-      supportsLanguage: () => true,
-      requiredModelPackIds: () => [],
-      synthesize: async () => {
-        throw new Error('synthesize must go through offscreen');
-      },
-    },
     artifactStore: dependencies.artifactStore,
     getSpeechPackStatus: packId => dependencies.speechPackStore.getStatus(packId),
-    synthesize: async (request, signal) => {
-      const requestId = `queue-${Date.now()}`;
-      await dependencies.ensureOffscreenDocument();
-      const response = await dependencies.sendToOffscreen({
-        type: 'llt.offscreen.synthesize',
-        requestId,
-        pronunciationRequest: request,
-      });
-      if (signal?.aborted) {
-        throw new DOMException('Aborted', 'AbortError');
-      }
-      if (!response.ok || !('artifact' in response) || !response.artifact) {
-        throw new Error(
-          ('error' in response && typeof response.error === 'string'
-            ? response.error
-            : null) ?? 'Speech generation failed.',
-        );
-      }
-      const artifact = response.artifact as {
-        artifactKey: string;
-        filename: string;
-        dataBase64: string;
-        mimeType: string;
-        extension: string;
-        sampleRate: number;
-        language: string;
-        voiceId: string;
-        speed: number;
-      };
-      return {
-        artifactKey: artifact.artifactKey,
-        filename: artifact.filename,
-        bytes: base64ToBytes(artifact.dataBase64),
-        mimeType: artifact.mimeType,
-        extension: artifact.extension,
-        sampleRate: artifact.sampleRate,
-        language: artifact.language,
-        voiceId: artifact.voiceId,
-        speed: artifact.speed,
-      };
-    },
+    synthesize: (request, signal) =>
+      synthesizeThroughOffscreen(`queue-${crypto.randomUUID()}`, request, dependencies, signal),
   });
 }
 

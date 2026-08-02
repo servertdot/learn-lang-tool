@@ -1,26 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { TranslateResponse } from '@package/shared';
+import type { TranslationProvider } from '@package/shared';
 import { requestViewInAnki } from '@src/lib/messaging-anki';
 import {
   requestAddToAnkiWithPronunciation,
-  requestPronunciationPlay,
+  playPronunciationPreviewInBrowser,
+  requestPronunciationCancel,
   requestPronunciationPrepare,
   requestPronunciationStop,
   requestSpeechModelPackInstall,
 } from '@src/lib/messaging-pronunciation';
 import type { PronunciationRequest } from '@src/lib/audio-tts-provider';
 import { createProductTranslationFacade } from '@src/lib/product-translator';
-import { getLanguagePair } from '@src/lib/storage';
+import { getLanguagePair, getTranslationProvider } from '@src/lib/storage';
 import { takePendingSelection } from '@src/lib/pending-selection';
 import { formatApproxSize } from '@src/lib/speech-model-pack-registry';
 import { PopupTranslationResult } from './PopupTranslationResult';
 import type { AnkiAddState, AnkiViewState } from '@src/components/AnkiActions';
 import type { PronunciationControlState } from '@src/components/PronunciationControl';
-import {
-  canUseBrowserSpeech,
-  speakWithBrowser,
-  stopBrowserSpeech,
-} from '@src/lib/browser-speech';
+import { stopBrowserSpeech } from '@src/lib/browser-speech';
+import { buildPronunciationPolicy } from '@src/lib/tts-provider-registry';
 
 type PopupState =
   | { kind: 'loading'; sourceText: string }
@@ -37,24 +36,27 @@ export default function Popup() {
   const [ankiError, setAnkiError] = useState<string | null>(null);
   const [ankiNoteId, setAnkiNoteId] = useState<number | null>(null);
   const [pronunciationRequestId, setPronunciationRequestId] = useState<string | null>(null);
+  const pronunciationRequestIdRef = useRef<string | null>(null);
+  const [translationProvider, setActiveTranslationProvider] =
+    useState<TranslationProvider | null>(null);
   const [pronunciationState, setPronunciationState] = useState<PronunciationControlState | null>(
     null,
   );
+  const [ankiPronunciationState, setAnkiPronunciationState] =
+    useState<PronunciationControlState | null>(null);
   const [pronunciationError, setPronunciationError] = useState<string | null>(null);
   const [pronunciationApproxSizeBytes, setPronunciationApproxSizeBytes] = useState<
     number | undefined
   >();
   const [pronunciationArtifactKey, setPronunciationArtifactKey] = useState<string | undefined>();
-  const [pronunciationRequest, setPronunciationRequest] = useState<
-    PronunciationRequest | undefined
-  >();
+  const [pronunciationRequests, setPronunciationRequests] = useState<PronunciationRequest[]>();
   const [speechPackIdForInstall, setSpeechPackIdForInstall] = useState<string | undefined>();
   const [translatedPronunciationState, setTranslatedPronunciationState] =
     useState<PronunciationControlState | null>(null);
   const [translatedPronunciationError, setTranslatedPronunciationError] = useState<
     string | null
   >(null);
-  const translatedSpeechRunRef = useRef(0);
+  const pronunciationPlaybackAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,7 +71,11 @@ export default function Popup() {
 
       setState({ kind: 'loading', sourceText: pending.text });
       try {
-        const pair = await getLanguagePair();
+        const [pair, activeProvider] = await Promise.all([
+          getLanguagePair(),
+          getTranslationProvider(),
+        ]);
+        setActiveTranslationProvider(activeProvider);
         const result = await translateFacade.translate(
           {
             text: pending.text,
@@ -79,28 +85,41 @@ export default function Popup() {
           controller.signal,
         );
         setState({ kind: 'success', result });
-        const translatedSpeechSupported = canUseBrowserSpeech(window);
-        setTranslatedPronunciationState(translatedSpeechSupported ? 'ready' : 'unsupported');
-        setTranslatedPronunciationError(
-          translatedSpeechSupported ? null : 'Speech playback is unavailable in this browser.',
-        );
+        setPronunciationState('ready');
+        setTranslatedPronunciationState('ready');
+        setTranslatedPronunciationError(null);
         if (result.can_add_to_anki) {
           const requestId = crypto.randomUUID();
           setPronunciationRequestId(requestId);
-          setPronunciationState('preparing');
-          const response = await requestPronunciationPrepare(requestId, result);
+          pronunciationRequestIdRef.current = requestId;
+          setAnkiPronunciationState('preparing');
+          setPronunciationRequests(
+            buildPronunciationPolicy({
+              text: result.source_text,
+              language: result.from_code,
+              translationProvider: activeProvider,
+              purpose: 'anki',
+            }).pronunciationRequests,
+          );
+          const response = await requestPronunciationPrepare({
+            requestId: `${requestId}:anki`,
+            text: result.source_text,
+            language: result.from_code,
+            translationProvider: activeProvider,
+            purpose: 'anki',
+          }, controller.signal);
           if (controller.signal.aborted) return;
           if (!response.ok) {
-            setPronunciationState('failed');
-            setPronunciationError(response.error);
+            setAnkiPronunciationState('failed');
             return;
           }
-          setPronunciationState(response.uiState);
-          setPronunciationError(response.errorMessage ?? null);
+          setAnkiPronunciationState(response.uiState);
           setPronunciationApproxSizeBytes(response.approxSizeBytes);
           setPronunciationArtifactKey(response.artifactKey);
           setSpeechPackIdForInstall(response.speechModelPackId);
-          setPronunciationRequest(response.pronunciationRequest);
+          if (response.pronunciationRequests) {
+            setPronunciationRequests(response.pronunciationRequests);
+          }
         }
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -114,8 +133,15 @@ export default function Popup() {
 
     return () => {
       controller.abort();
+      pronunciationPlaybackAbortRef.current?.abort();
+      if (pronunciationRequestIdRef.current) {
+        for (const suffix of ['anki', 'original', 'translated']) {
+          void requestPronunciationCancel(`${pronunciationRequestIdRef.current}:${suffix}`, {
+            discardSession: true,
+          });
+        }
+      }
       void requestPronunciationStop();
-      translatedSpeechRunRef.current += 1;
       stopBrowserSpeech(window);
     };
   }, []);
@@ -128,7 +154,7 @@ export default function Popup() {
     setAnkiError(null);
 
     try {
-      if (pronunciationState === 'pack_missing' && speechPackIdForInstall) {
+      if (ankiPronunciationState === 'pack_missing' && speechPackIdForInstall) {
         const sizeLabel = pronunciationApproxSizeBytes
           ? formatApproxSize(pronunciationApproxSizeBytes)
           : '';
@@ -149,7 +175,7 @@ export default function Popup() {
           sentence: result.source_text,
         },
         {
-          pronunciationRequest,
+          pronunciationRequests,
           artifactKey: pronunciationArtifactKey,
         },
       );
@@ -178,67 +204,87 @@ export default function Popup() {
   };
 
   const handlePlayPronunciation = async () => {
-    if (!pronunciationArtifactKey) return;
-    translatedSpeechRunRef.current += 1;
-    stopBrowserSpeech(window);
+    if (state.kind !== 'success' || !pronunciationRequestId || !translationProvider) return;
+    pronunciationPlaybackAbortRef.current?.abort();
+    const controller = new AbortController();
+    pronunciationPlaybackAbortRef.current = controller;
     setTranslatedPronunciationState(current => (current === 'playing' ? 'stopped' : current));
     setPronunciationState('playing');
-    const response = await requestPronunciationPlay(pronunciationArtifactKey);
-    if (!response.ok) {
-      setPronunciationState('failed');
-      setPronunciationError(response.error);
-      return;
-    }
-    setPronunciationState('stopped');
+    setPronunciationError(null);
+    const result = await playPronunciationPreviewInBrowser(
+      {
+        requestId: `${pronunciationRequestId}:original`,
+        text: state.result.source_text,
+        language: state.result.from_code,
+        translationProvider,
+        purpose: 'preview',
+      },
+      window,
+      controller.signal,
+    );
+    if (pronunciationPlaybackAbortRef.current !== controller) return;
+    setPronunciationState(result.uiState);
+    setPronunciationError(result.errorMessage ?? null);
   };
 
   const handlePlayTranslatedPronunciation = async () => {
-    if (state.kind !== 'success') return;
-    const runId = translatedSpeechRunRef.current + 1;
-    translatedSpeechRunRef.current = runId;
+    if (state.kind !== 'success' || !pronunciationRequestId || !translationProvider) return;
+    pronunciationPlaybackAbortRef.current?.abort();
+    const controller = new AbortController();
+    pronunciationPlaybackAbortRef.current = controller;
 
     setPronunciationState(current => (current === 'playing' ? 'stopped' : current));
     setTranslatedPronunciationState('playing');
     setTranslatedPronunciationError(null);
 
-    try {
-      await requestPronunciationStop().catch(() => undefined);
-      if (translatedSpeechRunRef.current !== runId) return;
-      await speakWithBrowser(state.result.translated_text, state.result.to_code, window);
-      if (translatedSpeechRunRef.current === runId) {
-        setTranslatedPronunciationState('stopped');
-      }
-    } catch (error) {
-      if (translatedSpeechRunRef.current !== runId) return;
-      setTranslatedPronunciationState('failed');
-      setTranslatedPronunciationError(
-        error instanceof Error ? error.message : 'Could not play the translated text.',
-      );
-    }
+    const result = await playPronunciationPreviewInBrowser(
+      {
+        requestId: `${pronunciationRequestId}:translated`,
+        text: state.result.translated_text,
+        language: state.result.to_code,
+        translationProvider,
+        purpose: 'preview',
+      },
+      window,
+      controller.signal,
+    );
+    if (pronunciationPlaybackAbortRef.current !== controller) return;
+    setTranslatedPronunciationState(result.uiState);
+    setTranslatedPronunciationError(result.errorMessage ?? null);
   };
 
   const handleStopTranslatedPronunciation = () => {
-    translatedSpeechRunRef.current += 1;
+    pronunciationPlaybackAbortRef.current?.abort();
+    pronunciationPlaybackAbortRef.current = null;
+    if (pronunciationRequestId) {
+      void requestPronunciationCancel(`${pronunciationRequestId}:translated`);
+    }
     stopBrowserSpeech(window);
+    void requestPronunciationStop();
     setTranslatedPronunciationState('stopped');
   };
 
-  const handleRetryPronunciation = async () => {
-    if (state.kind !== 'success' || !pronunciationRequestId) return;
-    setPronunciationState('preparing');
-    setPronunciationError(null);
-    const response = await requestPronunciationPrepare(pronunciationRequestId, state.result);
+  const retryAnkiPreparation = async () => {
+    if (state.kind !== 'success' || !pronunciationRequestId || !translationProvider) return;
+    setAnkiPronunciationState('preparing');
+    const response = await requestPronunciationPrepare({
+      requestId: `${pronunciationRequestId}:anki`,
+      text: state.result.source_text,
+      language: state.result.from_code,
+      translationProvider,
+      purpose: 'anki',
+    });
     if (!response.ok) {
-      setPronunciationState('failed');
-      setPronunciationError(response.error);
+      setAnkiPronunciationState('failed');
       return;
     }
-    setPronunciationState(response.uiState);
-    setPronunciationError(response.errorMessage ?? null);
+    setAnkiPronunciationState(response.uiState);
     setPronunciationApproxSizeBytes(response.approxSizeBytes);
     setPronunciationArtifactKey(response.artifactKey);
     setSpeechPackIdForInstall(response.speechModelPackId);
-    setPronunciationRequest(response.pronunciationRequest);
+    if (response.pronunciationRequests) {
+      setPronunciationRequests(response.pronunciationRequests);
+    }
   };
 
   const handleInstallSpeechPack = async () => {
@@ -250,14 +296,14 @@ export default function Popup() {
       `Download the speech model pack${sizeLabel ? ` (${sizeLabel})` : ''}? Selected text stays on your device.`,
     );
     if (!ok) return;
-    setPronunciationState('preparing');
+    setAnkiPronunciationState('preparing');
     const install = await requestSpeechModelPackInstall(speechPackIdForInstall);
     if (!install.ok) {
-      setPronunciationState('failed');
-      setPronunciationError(install.error ?? 'Speech model pack download failed.');
+      setAnkiPronunciationState('failed');
+      setAnkiError(install.error ?? 'Speech model pack download failed.');
       return;
     }
-    await handleRetryPronunciation();
+    await retryAnkiPreparation();
   };
 
   return (
@@ -299,10 +345,16 @@ export default function Popup() {
           translatedPronunciationError={translatedPronunciationError}
           onPlayPronunciation={() => void handlePlayPronunciation()}
           onStopPronunciation={() => {
+            pronunciationPlaybackAbortRef.current?.abort();
+            pronunciationPlaybackAbortRef.current = null;
+            if (pronunciationRequestId) {
+              void requestPronunciationCancel(`${pronunciationRequestId}:original`);
+            }
+            stopBrowserSpeech(window);
             void requestPronunciationStop();
             setPronunciationState('stopped');
           }}
-          onRetryPronunciation={() => void handleRetryPronunciation()}
+          onRetryPronunciation={() => void handlePlayPronunciation()}
           onInstallSpeechPack={() => void handleInstallSpeechPack()}
           onPlayTranslatedPronunciation={() => void handlePlayTranslatedPronunciation()}
           onStopTranslatedPronunciation={handleStopTranslatedPronunciation}

@@ -75,3 +75,7 @@ _Avoid_: audio blob, media file, WAV (format-specific)
 **TTS provider**:
 The capability that converts a pronunciation request into a pronunciation artifact. Kokoro is the initial provider; the product selects by source language through a provider-language registry.
 _Avoid_: speech engine, voice API, synthesizer service
+
+**Pronunciation policy**:
+The ordered TTS providers authorized for exact text, language, active translation provider, and purpose. Preview policy may end with Web Speech; Anki policy contains artifact-capable pronunciation requests only and is persisted without later adding a newly remote provider.
+_Avoid_: fallback list, TTS cascade, provider chain (when referring to the durable policy)
