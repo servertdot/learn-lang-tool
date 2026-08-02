@@ -11,6 +11,7 @@ import {
   type PronunciationControlState,
 } from './PronunciationControl';
 import { SettingsAction } from './SettingsAction';
+import { AnkiPronunciationStatus } from './AnkiPronunciationStatus';
 
 export type { AnkiAddState, AnkiViewState } from './AnkiActions';
 export type { PronunciationControlState } from './PronunciationControl';
@@ -42,6 +43,7 @@ interface Props {
   ankiState?: AnkiAddState;
   ankiViewState?: AnkiViewState;
   ankiError?: string | null;
+  ankiPronunciationState?: PronunciationControlState | null;
   pronunciationState?: PronunciationControlState | null;
   pronunciationError?: string | null;
   pronunciationApproxSizeBytes?: number;
@@ -54,6 +56,7 @@ interface Props {
   onPlayTranslatedPronunciation?: () => void;
   onStopTranslatedPronunciation?: () => void;
   onRetryTranslatedPronunciation?: () => void;
+  onRetryAnkiPronunciation?: () => void;
 }
 
 export function TranslationPopover({
@@ -66,6 +69,7 @@ export function TranslationPopover({
   ankiState = 'idle',
   ankiViewState = 'idle',
   ankiError,
+  ankiPronunciationState = null,
   pronunciationState = null,
   pronunciationError,
   pronunciationApproxSizeBytes,
@@ -78,6 +82,7 @@ export function TranslationPopover({
   onPlayTranslatedPronunciation,
   onStopTranslatedPronunciation,
   onRetryTranslatedPronunciation,
+  onRetryAnkiPronunciation,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -204,6 +209,14 @@ export function TranslationPopover({
             <p className="mb-3 text-xs leading-relaxed text-amber-700" role="status">
               Saved locally. It will sync when Anki is open.
             </p>
+          )}
+
+          {state.data.can_add_to_anki && (
+            <AnkiPronunciationStatus
+              state={ankiPronunciationState}
+              onRetry={onRetryAnkiPronunciation}
+              onInstallSpeechPack={onInstallSpeechPack}
+            />
           )}
 
           <p

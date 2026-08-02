@@ -40,6 +40,7 @@ export interface GoogleTranslateTtsProviderOptions {
     chunks: readonly Uint8Array[],
     signal: AbortSignal,
   ): Promise<GoogleTranslateTtsAssemblyResult>;
+  validateAudio?(bytes: Uint8Array, signal: AbortSignal): Promise<void>;
 }
 
 function normalizeGoogleSpeechLanguage(language: string): string {
@@ -264,6 +265,23 @@ export async function assembleGoogleTranslateTtsAudio(
   }
 }
 
+async function validateGoogleTranslateTtsAudio(
+  bytes: Uint8Array,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) throw cancelledError();
+  const context = new AudioContext({ sampleRate: MP3_SAMPLE_RATE_HZ });
+  try {
+    const decoded = await context.decodeAudioData(bytes.slice().buffer as ArrayBuffer);
+    if (signal.aborted) throw cancelledError();
+    if (decoded.length === 0 || decoded.numberOfChannels === 0) {
+      throw new Error('Encoded audio was empty.');
+    }
+  } finally {
+    await context.close();
+  }
+}
+
 export function createGoogleTranslateTtsProvider(
   options: GoogleTranslateTtsProviderOptions = {},
 ): AudioTtsProvider {
@@ -274,6 +292,7 @@ export function createGoogleTranslateTtsProvider(
   const maxChunkBytes = options.maxChunkResponseBytes ?? DEFAULT_MAX_CHUNK_RESPONSE_BYTES;
   const maxArtifactBytes = options.maxArtifactBytes ?? DEFAULT_MAX_ARTIFACT_BYTES;
   const assembleAudio = options.assembleAudio ?? assembleGoogleTranslateTtsAudio;
+  const validateAudio = options.validateAudio ?? validateGoogleTranslateTtsAudio;
 
   return {
     id: GOOGLE_TRANSLATE_TTS_PROVIDER_ID,
@@ -336,6 +355,16 @@ export function createGoogleTranslateTtsProvider(
           throw new TtsError('artifact_encoding_failed', 'Google speech audio was invalid.');
         }
         if (assembled.bytes.byteLength === 0 || assembled.bytes.byteLength > maxArtifactBytes) {
+          throw new TtsError('artifact_encoding_failed', 'Google speech audio was invalid.');
+        }
+        try {
+          await validateAudio(assembled.bytes, controller.signal);
+        } catch (error) {
+          if (controller.signal.aborted) {
+            if (callerSignal?.aborted) throw cancelledError();
+            throw new TtsError('generation_timed_out', 'Google speech validation timed out.');
+          }
+          if (error instanceof TtsError) throw error;
           throw new TtsError('artifact_encoding_failed', 'Google speech audio was invalid.');
         }
 

@@ -88,10 +88,10 @@ export default function Popup() {
         setPronunciationState('ready');
         setTranslatedPronunciationState('ready');
         setTranslatedPronunciationError(null);
+        const requestId = crypto.randomUUID();
+        setPronunciationRequestId(requestId);
+        pronunciationRequestIdRef.current = requestId;
         if (result.can_add_to_anki) {
-          const requestId = crypto.randomUUID();
-          setPronunciationRequestId(requestId);
-          pronunciationRequestIdRef.current = requestId;
           setAnkiPronunciationState('preparing');
           setPronunciationRequests(
             buildPronunciationPolicy({
@@ -115,7 +115,7 @@ export default function Popup() {
           }
           setAnkiPronunciationState(response.uiState);
           setPronunciationApproxSizeBytes(response.approxSizeBytes);
-          setPronunciationArtifactKey(response.artifactKey);
+          if (response.artifactKey) setPronunciationArtifactKey(response.artifactKey);
           setSpeechPackIdForInstall(response.speechModelPackId);
           if (response.pronunciationRequests) {
             setPronunciationRequests(response.pronunciationRequests);
@@ -225,6 +225,8 @@ export default function Popup() {
     if (pronunciationPlaybackAbortRef.current !== controller) return;
     setPronunciationState(result.uiState);
     setPronunciationError(result.errorMessage ?? null);
+    if (result.artifactKey) setPronunciationArtifactKey(result.artifactKey);
+    if (result.pronunciationRequests) setPronunciationRequests(result.pronunciationRequests);
   };
 
   const handlePlayTranslatedPronunciation = async () => {
@@ -280,7 +282,7 @@ export default function Popup() {
     }
     setAnkiPronunciationState(response.uiState);
     setPronunciationApproxSizeBytes(response.approxSizeBytes);
-    setPronunciationArtifactKey(response.artifactKey);
+    if (response.artifactKey) setPronunciationArtifactKey(response.artifactKey);
     setSpeechPackIdForInstall(response.speechModelPackId);
     if (response.pronunciationRequests) {
       setPronunciationRequests(response.pronunciationRequests);
@@ -335,6 +337,7 @@ export default function Popup() {
           ankiState={ankiState}
           ankiViewState={ankiViewState}
           ankiError={ankiError}
+          ankiPronunciationState={ankiPronunciationState}
           onAddToAnki={() => void handleAddToAnki()}
           onViewInAnki={() => void handleViewInAnki()}
           onOpenSettings={() => void chrome.runtime.openOptionsPage()}
@@ -359,6 +362,7 @@ export default function Popup() {
           onPlayTranslatedPronunciation={() => void handlePlayTranslatedPronunciation()}
           onStopTranslatedPronunciation={handleStopTranslatedPronunciation}
           onRetryTranslatedPronunciation={() => void handlePlayTranslatedPronunciation()}
+          onRetryAnkiPronunciation={() => void retryAnkiPreparation()}
         />
       )}
 

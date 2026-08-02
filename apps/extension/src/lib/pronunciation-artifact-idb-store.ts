@@ -113,6 +113,11 @@ export function createIndexedDbPronunciationArtifactStore(): PronunciationArtifa
       const db = await openDb();
       try {
         const meta = await readMeta();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const existing = (await idbRequest(
+          store.get(artifact.artifactKey),
+        )) as StoredRecord | undefined;
         const record: StoredRecord = {
           artifactKey: artifact.artifactKey,
           filename: artifact.filename,
@@ -123,11 +128,11 @@ export function createIndexedDbPronunciationArtifactStore(): PronunciationArtifa
           voiceId: artifact.voiceId,
           speed: artifact.speed,
           dataBase64: bytesToBase64(artifact.bytes),
-          pinned: options.pinned ?? false,
+          // Only unpin through unpin(); this transaction preserves a concurrent queue pin.
+          pinned: existing?.pinned === true || options.pinned === true,
           lastAccessedAt: options.now ?? Date.now(),
         };
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).put(record);
+        store.put(record);
         await new Promise<void>((resolve, reject) => {
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error ?? new Error('IndexedDB put failed'));

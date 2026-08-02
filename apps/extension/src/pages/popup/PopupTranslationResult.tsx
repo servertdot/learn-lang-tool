@@ -10,12 +10,14 @@ import {
   type PronunciationControlState,
 } from '../../components/PronunciationControl';
 import { SettingsAction } from '../../components/SettingsAction';
+import { AnkiPronunciationStatus } from '../../components/AnkiPronunciationStatus';
 
 interface PopupTranslationResultProps {
   result: TranslateResponse;
   ankiState: AnkiAddState;
   ankiViewState: AnkiViewState;
   ankiError: string | null;
+  ankiPronunciationState?: PronunciationControlState | null;
   onAddToAnki: () => void;
   onViewInAnki: () => void;
   onOpenSettings: () => void;
@@ -31,6 +33,7 @@ interface PopupTranslationResultProps {
   onPlayTranslatedPronunciation?: () => void;
   onStopTranslatedPronunciation?: () => void;
   onRetryTranslatedPronunciation?: () => void;
+  onRetryAnkiPronunciation?: () => void;
 }
 
 export function PopupTranslationResult({
@@ -38,6 +41,7 @@ export function PopupTranslationResult({
   ankiState,
   ankiViewState,
   ankiError,
+  ankiPronunciationState = null,
   onAddToAnki,
   onViewInAnki,
   onOpenSettings,
@@ -53,6 +57,7 @@ export function PopupTranslationResult({
   onPlayTranslatedPronunciation,
   onStopTranslatedPronunciation,
   onRetryTranslatedPronunciation,
+  onRetryAnkiPronunciation,
 }: PopupTranslationResultProps) {
   return (
     <section className="bg-white p-4">
@@ -94,6 +99,14 @@ export function PopupTranslationResult({
         <p className="mt-2 text-xs leading-relaxed text-amber-700" role="status">
           Saved locally. It will sync when Anki is open.
         </p>
+      )}
+
+      {result.can_add_to_anki && (
+        <AnkiPronunciationStatus
+          state={ankiPronunciationState}
+          onRetry={onRetryAnkiPronunciation}
+          onInstallSpeechPack={onInstallSpeechPack}
+        />
       )}
 
       <div className="my-3 border-t border-slate-200" />

@@ -278,7 +278,7 @@ function ContentApp() {
               ...prev,
               ankiPronunciationState: response.uiState,
               pronunciationApproxSizeBytes: response.approxSizeBytes,
-              pronunciationArtifactKey: response.artifactKey,
+              pronunciationArtifactKey: response.artifactKey ?? prev.pronunciationArtifactKey,
               speechPackIdForInstall: response.speechModelPackId,
               pronunciationRequests: response.pronunciationRequests ?? prev.pronunciationRequests,
             };
@@ -409,7 +409,7 @@ function ContentApp() {
           ...prev,
           ankiPronunciationState: response.uiState,
           pronunciationApproxSizeBytes: response.approxSizeBytes,
-          pronunciationArtifactKey: response.artifactKey,
+          pronunciationArtifactKey: response.artifactKey ?? prev.pronunciationArtifactKey,
           speechPackIdForInstall: response.speechModelPackId,
           pronunciationRequests: response.pronunciationRequests ?? prev.pronunciationRequests,
         };
@@ -545,6 +545,8 @@ function ContentApp() {
       ...prev,
       pronunciationState: result.uiState,
       pronunciationError: result.errorMessage ?? null,
+      pronunciationArtifactKey: result.artifactKey ?? prev.pronunciationArtifactKey,
+      pronunciationRequests: result.pronunciationRequests ?? prev.pronunciationRequests,
     } : null);
   }, [popover]);
 
@@ -712,6 +714,7 @@ function ContentApp() {
       ankiState={popover.ankiState}
       ankiViewState={popover.ankiViewState}
       ankiError={popover.ankiError}
+      ankiPronunciationState={popover.ankiPronunciationState}
       pronunciationState={popover.pronunciationState}
       pronunciationError={popover.pronunciationError}
       pronunciationApproxSizeBytes={popover.pronunciationApproxSizeBytes}
@@ -724,6 +727,7 @@ function ContentApp() {
       onPlayTranslatedPronunciation={() => void handlePlayTranslatedPronunciation()}
       onStopTranslatedPronunciation={handleStopTranslatedPronunciation}
       onRetryTranslatedPronunciation={() => void handlePlayTranslatedPronunciation()}
+      onRetryAnkiPronunciation={retryAnkiPreparation}
       onOpenSettings={() => {
         void requestOpenExtensionOptions().catch(error => {
           lltError('content', 'Could not open extension settings', error);

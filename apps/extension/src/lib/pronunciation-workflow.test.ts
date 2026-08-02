@@ -372,6 +372,30 @@ describe('queue-first pronunciation and Anki sync', () => {
     expect((await restartedQueue.list())[0]?.audioStatus).toBe('ready_to_sync');
   });
 
+  it('recreates a missing artifact after a sync failure instead of remaining stuck', async () => {
+    const queue = new AnkiQueue(createMemoryStorage(), { createId: () => 'missing-artifact' });
+    const store = createMemoryPronunciationArtifactStore();
+    await enqueueCardWithRequiredAudio(queue, {
+      note,
+      pronunciationRequests: [googleRequest],
+      artifactKey: 'pron:missing',
+    });
+    await syncAnkiQueue(queue, DEFAULT_ANKI_SETTINGS, {
+      findNoteIds: vi.fn().mockResolvedValue([]),
+      addNote: vi.fn(),
+      artifactStore: store,
+      audioFieldsForNote: () => ['Reading'],
+    });
+    expect((await queue.list())[0]?.audioStatus).toBe('sync_failed');
+
+    await fulfillQueuedPronunciation(
+      queue,
+      dependencies({ artifactStore: store }),
+    );
+
+    expect((await queue.list())[0]?.audioStatus).toBe('ready_to_sync');
+  });
+
   it('continues to fulfill legacy queue entries with one pronunciation request', async () => {
     const storage = createMemoryStorage();
     const queue = new AnkiQueue(storage, { createId: () => 'legacy-audio' });

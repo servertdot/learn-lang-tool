@@ -97,4 +97,22 @@ describe('PopupTranslationResult', () => {
 
     expect(html).toContain('Saved locally. It will sync when Anki is open.');
   });
+
+  it('shows Anki pronunciation preparation independently from preview playback', () => {
+    const html = renderToStaticMarkup(
+      <PopupTranslationResult
+        result={result}
+        ankiState="idle"
+        ankiViewState="idle"
+        ankiError={null}
+        ankiPronunciationState="preparing"
+        onAddToAnki={vi.fn()}
+        onViewInAnki={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('Preparing pronunciation for Anki…');
+    expect(html).not.toContain('aria-label="Preparing original text"');
+  });
 });

@@ -47,6 +47,18 @@ describe('createMemoryPronunciationArtifactStore', () => {
     expect(await store.get('pron:newer')).not.toBeNull();
   });
 
+  it('does not unpin a queued artifact when concurrent preparation writes the same key', async () => {
+    const store = createMemoryPronunciationArtifactStore();
+    await store.put(sampleArtifact('pron:shared'), { pinned: true, now: 1 });
+
+    await store.put(sampleArtifact('pron:shared'), { now: 2 });
+
+    expect(await store.get('pron:shared')).toMatchObject({
+      pinned: true,
+      lastAccessedAt: 2,
+    });
+  });
+
   it('deletes artifacts that are no longer referenced', async () => {
     const store = createMemoryPronunciationArtifactStore();
     await store.put(sampleArtifact('pron:keep'));

@@ -1,8 +1,7 @@
-import type { TranslateResponse, TranslationProvider } from '@package/shared';
+import type { TranslationProvider } from '@package/shared';
 import {
   computeArtifactIdentity,
   TtsError,
-  type AudioTtsProvider,
   type PronunciationArtifact,
   type PronunciationRequest,
 } from './audio-tts-provider';
@@ -60,8 +59,6 @@ export interface PronunciationWorkflowDependencies {
   ): Promise<PronunciationArtifact>;
   playArtifact?(artifactKey: string, signal: AbortSignal): Promise<void>;
   playWebSpeech?(text: string, language: string, signal: AbortSignal): Promise<void>;
-  /** Retained while old adapters migrate to the provider-neutral synthesize capability. */
-  ttsProvider?: AudioTtsProvider;
 }
 
 function requestListState(
@@ -252,27 +249,6 @@ export async function runPronunciationWorkflow(
   };
 }
 
-/** Compatibility wrapper for the eager original-text Anki preparation path. */
-export function preparePronunciationForResult(
-  result: TranslateResponse,
-  requestId: string,
-  dependencies: PronunciationWorkflowDependencies,
-  signal?: AbortSignal,
-  translationProvider: TranslationProvider = 'bergamot',
-): Promise<PronunciationSessionState> {
-  return runPronunciationWorkflow(
-    {
-      requestId,
-      text: result.source_text,
-      language: result.from_code,
-      translationProvider,
-      purpose: 'anki',
-    },
-    dependencies,
-    signal,
-  );
-}
-
 export interface EnqueueCardWithAudioInput {
   note: Parameters<AnkiQueue['enqueue']>[0];
   pronunciationRequests?: PronunciationRequest[];
@@ -312,7 +288,11 @@ export async function fulfillQueuedPronunciation(
 ): Promise<void> {
   const items = await queue.list();
   for (const item of items) {
-    if (item.audioStatus !== 'waiting_for_audio' && item.audioStatus !== 'audio_failed') {
+    if (
+      item.audioStatus !== 'waiting_for_audio' &&
+      item.audioStatus !== 'audio_failed' &&
+      item.audioStatus !== 'sync_failed'
+    ) {
       continue;
     }
     const requests = item.pronunciationRequests ??

@@ -82,6 +82,7 @@ describe('Google Translate web TTS provider', () => {
       fetch: fetchMock,
       maxCharsPerRequest: 8,
       assembleAudio,
+      validateAudio: vi.fn().mockResolvedValue(undefined),
     });
 
     const artifact = await provider.synthesize(request({ text: 'Hello. World.' }));
@@ -200,6 +201,26 @@ describe('Google Translate web TTS provider', () => {
     await expect(provider.synthesize(request())).rejects.toMatchObject({
       code: 'artifact_encoding_failed',
     });
+  });
+
+  it('rejects an assembled artifact that is not decodable', async () => {
+    const validateAudio = vi.fn().mockRejectedValue(new Error('invalid final mp3'));
+    const provider = createGoogleTranslateTtsProvider({
+      fetch: vi.fn().mockResolvedValue(audioResponse()),
+      assembleAudio: vi.fn().mockResolvedValue({
+        bytes: new Uint8Array([1, 2, 3]),
+        sampleRate: 24_000,
+      }),
+      validateAudio,
+    });
+
+    await expect(provider.synthesize(request())).rejects.toMatchObject({
+      code: 'artifact_encoding_failed',
+    });
+    expect(validateAudio).toHaveBeenCalledWith(
+      new Uint8Array([1, 2, 3]),
+      expect.any(AbortSignal),
+    );
   });
 
   it('uses the conservative probed request limit by default', () => {

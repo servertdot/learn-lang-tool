@@ -64,6 +64,30 @@ describe('TranslationPopover', () => {
     expect(html).toContain('aria-label="Preparing original text"');
   });
 
+  it('shows Anki audio preparation and exposes a distinct retry action on failure', () => {
+    const html = renderToStaticMarkup(
+      <TranslationPopover
+        state={{
+          kind: 'success',
+          data: {
+            source_text: 'hello',
+            translated_text: 'привет',
+            from_code: 'en',
+            to_code: 'ru',
+            can_add_to_anki: true,
+          },
+        }}
+        position={{ x: 0, y: 0 }}
+        onOpenSettings={vi.fn()}
+        ankiPronunciationState="failed"
+        onRetryAnkiPronunciation={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('Couldn’t prepare pronunciation for Anki.');
+    expect(html).toContain('aria-label="Retry Anki pronunciation"');
+  });
+
   it('explains that a card is safely queued while Anki is closed', () => {
     const html = renderToStaticMarkup(
       <TranslationPopover

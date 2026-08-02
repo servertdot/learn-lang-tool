@@ -60,6 +60,7 @@ export function createMemoryPronunciationArtifactStore(
       return entry ? { ...entry, bytes: entry.bytes.slice() } : null;
     },
     async put(artifact, putOptions = {}) {
+      const existing = entries.get(artifact.artifactKey);
       entries.set(artifact.artifactKey, {
         artifactKey: artifact.artifactKey,
         filename: artifact.filename,
@@ -70,7 +71,8 @@ export function createMemoryPronunciationArtifactStore(
         voiceId: artifact.voiceId,
         speed: artifact.speed,
         bytes: artifact.bytes.slice(),
-        pinned: putOptions.pinned ?? false,
+        // Only unpin through unpin(); a concurrent preview write must not downgrade queue data.
+        pinned: existing?.pinned === true || putOptions.pinned === true,
         lastAccessedAt: putOptions.now ?? Date.now(),
       });
       evictIfNeeded();
