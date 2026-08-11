@@ -40,7 +40,7 @@ Google Translate receives the selected text when it is the active provider. With
 
 - **Google Docs:** an accessibility frame reads canvas selections and forwards them to the visible translation popover. The clipboard fallback restores the user's clipboard.
 - **YouTube:** when there is no regular selection, the hotkey translates the current visible subtitle line.
-- **Built-in PDF viewer:** select text and choose **Translate selection** from the context menu; the result opens in the extension popup.
+- **Built-in PDF viewer:** select text and press the configured hotkey, or choose **Translate selection** from the context menu; the result opens in the extension popup.
 
 ## LLT and Yomitan
 

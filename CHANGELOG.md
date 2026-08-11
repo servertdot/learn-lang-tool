@@ -2,6 +2,12 @@
 
 All notable changes to Learn Lang Tool are documented in this file.
 
+## 1.0.4 - 2026-08-11
+
+### Fixes
+
+- Restore the configured translation hotkey for selected text in the built-in PDF viewer.
+
 ## 1.0.3 - 2026-08-11
 
 ### Improvements

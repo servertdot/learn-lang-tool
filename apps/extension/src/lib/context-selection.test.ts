@@ -3,6 +3,7 @@ import {
   TRANSLATE_SELECTION_MENU_ID,
   handleContextSelection,
   openSelectionResult,
+  showSelectionTranslation,
 } from './context-selection';
 
 describe('handleContextSelection', () => {
@@ -56,5 +57,25 @@ describe('handleContextSelection', () => {
 
     expect(openActionPopup).toHaveBeenCalledWith(42);
     expect(openWindow).toHaveBeenCalledOnce();
+  });
+
+  it('opens a selected PDF translation requested by the viewer hotkey', async () => {
+    const saveSelection = vi.fn(async () => undefined);
+    const openPopup = vi.fn(async () => undefined);
+
+    await showSelectionTranslation(
+      {
+        text: '  selected PDF text  ',
+        pageUrl: 'https://example.com/file.pdf',
+      },
+      42,
+      { saveSelection, openPopup },
+    );
+
+    expect(saveSelection).toHaveBeenCalledWith({
+      text: 'selected PDF text',
+      pageUrl: 'https://example.com/file.pdf',
+    });
+    expect(openPopup).toHaveBeenCalledWith(42);
   });
 });

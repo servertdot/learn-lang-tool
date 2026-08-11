@@ -15,10 +15,12 @@ interface ContextSelectionTab {
   windowId?: number;
 }
 
-interface ContextSelectionDependencies {
+export interface SelectionTranslationDependencies {
   saveSelection(selection: PendingSelection): Promise<void>;
   openPopup(windowId?: number): Promise<void>;
 }
+
+type ContextSelectionDependencies = SelectionTranslationDependencies;
 
 interface SelectionResultDependencies {
   openActionPopup(windowId?: number): Promise<void>;
@@ -43,9 +45,21 @@ export async function handleContextSelection(
 ): Promise<void> {
   if (info.menuItemId !== TRANSLATE_SELECTION_MENU_ID) return;
 
-  const text = info.selectionText?.trim();
+  await showSelectionTranslation(
+    { text: info.selectionText ?? '', pageUrl: info.pageUrl },
+    tab.windowId,
+    dependencies,
+  );
+}
+
+export async function showSelectionTranslation(
+  selection: PendingSelection,
+  windowId: number | undefined,
+  dependencies: SelectionTranslationDependencies,
+): Promise<void> {
+  const text = selection.text.trim();
   if (!text) return;
 
-  await dependencies.saveSelection({ text, pageUrl: info.pageUrl });
-  await dependencies.openPopup(tab.windowId);
+  await dependencies.saveSelection({ text, pageUrl: selection.pageUrl });
+  await dependencies.openPopup(windowId);
 }

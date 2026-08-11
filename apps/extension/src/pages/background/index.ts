@@ -59,6 +59,7 @@ import { syncAnkiQueue } from '@src/lib/anki-queue-sync';
 import {
   handleContextSelection,
   openSelectionResult,
+  showSelectionTranslation,
   TRANSLATE_SELECTION_MENU_ID,
 } from '@src/lib/context-selection';
 import { savePendingSelection } from '@src/lib/pending-selection';
@@ -148,6 +149,21 @@ function registerTranslateSelectionMenu(): void {
   );
 }
 
+async function openTranslationPopup(windowId?: number): Promise<void> {
+  await openSelectionResult(windowId, {
+    openActionPopup: id =>
+      chrome.action.openPopup(id === undefined ? {} : { windowId: id }),
+    openWindow: async () => {
+      await chrome.windows.create({
+        url: chrome.runtime.getURL('src/pages/popup/index.html'),
+        type: 'popup',
+        width: 400,
+        height: 520,
+      });
+    },
+  });
+}
+
 // Unpacked-extension Reload does not consistently emit onInstalled. Register at
 // worker startup as well; a duplicate create leaves the existing item intact.
 registerTranslateSelectionMenu();
@@ -168,20 +184,7 @@ void updateAnkiQueueSyncAlarm().catch(error => {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   void handleContextSelection(info, tab ?? {}, {
     saveSelection: savePendingSelection,
-    openPopup: async windowId => {
-      await openSelectionResult(windowId, {
-        openActionPopup: id =>
-          chrome.action.openPopup(id === undefined ? {} : { windowId: id }),
-        openWindow: async () => {
-          await chrome.windows.create({
-            url: chrome.runtime.getURL('src/pages/popup/index.html'),
-            type: 'popup',
-            width: 400,
-            height: 520,
-          });
-        },
-      });
-    },
+    openPopup: openTranslationPopup,
   }).catch(error => {
     lltError('bg', 'context selection failed', error);
   });
@@ -328,6 +331,19 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
       if (message.type === 'llt.openOptionsPage') {
         await openExtensionOptionsPage();
         sendResponse({ ok: true } satisfies OpenOptionsPageResponse);
+        return;
+      }
+
+      if (message.type === 'llt.selection.translate') {
+        await showSelectionTranslation(
+          { text: message.text, pageUrl: message.pageUrl },
+          sender.tab?.windowId,
+          {
+            saveSelection: savePendingSelection,
+            openPopup: openTranslationPopup,
+          },
+        );
+        sendResponse({ ok: true });
         return;
       }
 

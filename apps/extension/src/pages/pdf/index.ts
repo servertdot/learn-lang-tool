@@ -7,6 +7,8 @@ import {
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { LltMessage } from '@src/lib/extension-messages';
 import { readCurrentSelection } from '@src/lib/page-text-source';
+import { getHotkey } from '@src/lib/storage';
+import { registerSelectionHotkey } from '@src/lib/selection-hotkey';
 import './index.css';
 
 interface MimeStreamInfo {
@@ -165,6 +167,27 @@ download.addEventListener('click', () => {
 
 nativeViewer.addEventListener('click', () => {
   void mimeHandler?.abortAndFallbackToNativeHandler();
+});
+
+void registerSelectionHotkey(window, {
+  getHotkey,
+  readSelection: () => {
+    const selection = readCurrentSelection(window, document);
+    return selection
+      ? { text: selection.text, pageUrl: originalUrl || window.location.href }
+      : null;
+  },
+  translateSelection: selection =>
+    chrome.runtime.sendMessage({
+      type: 'llt.selection.translate',
+      text: selection.text,
+      pageUrl: selection.pageUrl,
+    } satisfies LltMessage),
+  onError: error => {
+    showStatus(error instanceof Error ? error.message : 'Could not translate the selection.');
+  },
+}).catch(error => {
+  showStatus(error instanceof Error ? error.message : 'Could not load the translation hotkey.');
 });
 
 void loadPdf().catch(error => {
