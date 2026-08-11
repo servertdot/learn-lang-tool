@@ -651,7 +651,13 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
 
       if (message.type === 'llt.anki.queue.export') {
         try {
-          const exported = exportAnkiQueue(await ankiQueue.list(), message.format);
+          const settings = await getAnkiSettings();
+          const exported = exportAnkiQueue(
+            await ankiQueue.list(),
+            message.format,
+            new Date(),
+            { [settings.modelName]: Object.keys(settings.fieldMappings) },
+          );
           sendResponse({ ok: true, ...exported } satisfies AnkiQueueExportResponse);
         } catch (err) {
           const error = err instanceof Error ? err.message : 'Could not export the Anki queue.';

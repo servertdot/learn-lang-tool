@@ -323,7 +323,7 @@ export default function Options() {
     }
   }
 
-  async function handleQueueExport(format: 'tsv' | 'csv') {
+  async function handleQueueExport(format: 'anki' | 'csv') {
     setAnkiQueueBusy(true);
     setAnkiQueueNotice(undefined);
     try {
@@ -337,7 +337,9 @@ export default function Options() {
       link.remove();
       URL.revokeObjectURL(url);
       setAnkiQueueNotice(
-        `${format.toUpperCase()} downloaded. The cards remain queued until you clear or sync them.`,
+        format === 'anki'
+          ? 'Anki import file downloaded. In Anki, choose File → Import and select the downloaded .txt file.'
+          : 'CSV downloaded. The cards remain queued until you clear or sync them.',
       );
     } catch (error) {
       setAnkiQueueNotice(error instanceof Error ? error.message : 'Could not export the queue.');
@@ -569,11 +571,11 @@ export default function Options() {
               </button>
               <button
                 type="button"
-                onClick={() => void handleQueueExport('tsv')}
+                onClick={() => void handleQueueExport('anki')}
                 disabled={ankiQueueBusy || ankiQueueInfo.count === 0}
                 className="button button-secondary"
               >
-                Export TSV
+                Download for Anki
               </button>
               <button
                 type="button"
@@ -585,7 +587,12 @@ export default function Options() {
               </button>
             </div>
 
-            <p className="queue-note">Manual TSV/CSV export is text-only and does not include generated pronunciation media.</p>
+            <ol className="anki-import-guide">
+              <li>Download the Anki import file.</li>
+              <li>In Anki Desktop, choose <strong>File → Import</strong> and select the downloaded <strong>.txt</strong> file.</li>
+              <li>Check the preview, import the notes, then clear this queue.</li>
+            </ol>
+            <p className="queue-note">Manual import is text-only and requires the configured note type to exist in Anki. Generated pronunciation media is not included.</p>
 
             {ankiQueueInfo.count > 0 && (
               <button

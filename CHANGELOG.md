@@ -9,6 +9,7 @@ All notable changes to Learn Lang Tool are documented in this file.
 - Prefer Google pronunciation in Google Translate mode, with Kokoro and Web Speech fallbacks.
 - Reuse validated pronunciation audio for Anki and keep queued audio retries durable across restarts.
 - Preserve Bergamot's no-Google privacy boundary and expose accessible preparation, failure, and retry states.
+- Download an Anki-ready text import with note-type field order preserved and guided import steps.
 - Translate the current text selection by clicking the extension icon, while preserving the right-click action.
 - Open PDFs in a selectable Chrome viewer so toolbar-click and right-click translation both work.
 

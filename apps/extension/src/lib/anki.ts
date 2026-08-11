@@ -105,10 +105,10 @@ export function createAnkiNote(
   content: AnkiCardContent,
 ): AnkiNote {
   const fields = Object.fromEntries(
-    Object.entries(settings.fieldMappings).flatMap(([fieldName, value]) => {
-      if (!value || !isAnkiTextFieldValue(value)) return [];
-      return [[fieldName, content[value]]];
-    }),
+    Object.entries(settings.fieldMappings).map(([fieldName, value]) => [
+      fieldName,
+      value && isAnkiTextFieldValue(value) ? content[value] : '',
+    ]),
   );
 
   return {

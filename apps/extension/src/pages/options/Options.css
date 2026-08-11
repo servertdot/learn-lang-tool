@@ -654,6 +654,16 @@ select:disabled {
   margin-top: 18px;
 }
 
+.anki-import-guide {
+  display: grid;
+  gap: 5px;
+  margin: 16px 0 0;
+  padding-left: 18px;
+  color: #5d4e45;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
 .queue-note {
   color: #8a6c5c;
 }

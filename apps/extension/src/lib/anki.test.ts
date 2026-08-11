@@ -19,6 +19,7 @@ describe('createAnkiNote', () => {
       modelName: 'Basic (and reversed card)',
       fields: {
         Word: 'hello',
+        Reading: '',
         Sentence: 'She said hello to everyone.',
         Meaning: 'привет',
       },
@@ -45,12 +46,13 @@ describe('createAnkiNote', () => {
 
     expect(note.fields).toEqual({
       Expression: 'word',
+      Pronunciation: '',
       Context: 'A word in context.',
       Translation: 'слово',
     });
   });
 
-  it('omits audio-mapped fields from text content (AnkiConnect attaches media)', () => {
+  it('keeps audio-mapped fields empty so exports preserve the Anki field order', () => {
     const settings = {
       ...DEFAULT_ANKI_SETTINGS,
       fieldMappings: {
@@ -67,6 +69,7 @@ describe('createAnkiNote', () => {
 
     expect(note.fields).toEqual({
       Word: 'hello',
+      Reading: '',
       Meaning: 'привет',
     });
     expect(getAnkiAudioFieldNames(settings)).toEqual(['Reading']);
