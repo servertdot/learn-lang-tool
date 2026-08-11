@@ -2,13 +2,15 @@
 
 All notable changes to Learn Lang Tool are documented in this file.
 
-## 1.0.3 - 2026-08-02
+## 1.0.3 - 2026-08-11
 
 ### Improvements
 
 - Prefer Google pronunciation in Google Translate mode, with Kokoro and Web Speech fallbacks.
 - Reuse validated pronunciation audio for Anki and keep queued audio retries durable across restarts.
 - Preserve Bergamot's no-Google privacy boundary and expose accessible preparation, failure, and retry states.
+- Translate the current text selection by clicking the extension icon, while preserving the right-click action.
+- Open PDFs in a selectable Chrome viewer so toolbar-click and right-click translation both work.
 
 ## 1.0.2 - 2026-08-02
 
