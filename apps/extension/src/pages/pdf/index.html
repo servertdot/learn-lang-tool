@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF — Learn Lang Tool</title>
+  </head>
+  <body>
+    <header class="toolbar" aria-label="PDF controls">
+      <div class="document-title" id="document-title">PDF</div>
+      <div class="toolbar-actions">
+        <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+        <output id="zoom-level" aria-label="Zoom level">100%</output>
+        <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+        <button id="download" type="button">Download</button>
+        <button id="native-viewer" type="button">Chrome viewer</button>
+      </div>
+    </header>
+    <main id="viewer-container" class="viewer-container">
+      <div id="status" class="status" role="status">Opening PDF…</div>
+      <div id="viewer" class="pdfViewer" aria-label="PDF document"></div>
+    </main>
+    <script type="module" src="./index.ts"></script>
+  </body>
+</html>

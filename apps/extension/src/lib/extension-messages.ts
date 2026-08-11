@@ -85,6 +85,7 @@ export type SpeechModelPackInstallResponse =
   | { ok: false; error?: string; aborted?: boolean };
 
 export type LltMessage =
+  | { type: 'llt.pageSelection.get'; tabId?: number }
   | { type: 'llt.translate'; requestId: string; request: TranslateRequest }
   | { type: 'llt.translate.cancel'; requestId: string }
   | {

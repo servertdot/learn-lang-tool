@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { readPageTextSource } from './page-text-source';
+import { readCurrentSelection, readPageTextSource } from './page-text-source';
 
 describe('readPageTextSource', () => {
   beforeEach(() => {
@@ -21,6 +21,22 @@ describe('readPageTextSource', () => {
     expect(source?.text).toBe('A normal selected phrase');
     expect(source?.kind).toBe('selection');
     expect(source?.range).toBe(range);
+  });
+
+  it('reads selected text from an editable field for the extension popup', () => {
+    const textarea = document.createElement('textarea');
+    textarea.value = 'Translate this part';
+    document.body.append(textarea);
+    textarea.focus();
+    textarea.setSelectionRange(10, 14);
+
+    const source = readCurrentSelection(window, document);
+
+    expect(source).toMatchObject({
+      text: 'this',
+      kind: 'editable-selection',
+      range: null,
+    });
   });
 
   it('reads the word under the pointer when there is no selection', async () => {

@@ -13,7 +13,7 @@ import {
 import type { PronunciationRequest } from '@src/lib/audio-tts-provider';
 import { createProductTranslationFacade } from '@src/lib/product-translator';
 import { getLanguagePair, getTranslationProvider } from '@src/lib/storage';
-import { takePendingSelection } from '@src/lib/pending-selection';
+import { getPopupSelection } from '@src/lib/popup-selection';
 import { formatApproxSize } from '@src/lib/speech-model-pack-registry';
 import { PopupTranslationResult } from './PopupTranslationResult';
 import type { AnkiAddState, AnkiViewState } from '@src/components/AnkiActions';
@@ -62,7 +62,7 @@ export default function Popup() {
     const controller = new AbortController();
 
     void (async () => {
-      const pending = await takePendingSelection();
+      const pending = await getPopupSelection();
       await chrome.action.setBadgeText({ text: '' });
       if (!pending) {
         setState({ kind: 'empty' });
@@ -314,8 +314,9 @@ export default function Popup() {
         <section className="p-4">
           <p className="text-sm font-medium">Translate text from any page</p>
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
-            Select text, right-click it, then choose <strong>Translate selection</strong>. This
-            also works in the browser PDF viewer.
+            Select text, then click the extension icon again. You can also right-click the text
+            and choose <strong>Translate selection</strong>. Use the right-click action if your
+            browser PDF viewer blocks direct selection access.
           </p>
         </section>
       )}

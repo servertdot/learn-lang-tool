@@ -315,6 +315,7 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
     message.type === 'llt.offscreen.stopPlayback' ||
     message.type === 'llt.translate.result' ||
     message.type === 'llt.translate.error' ||
+    message.type === 'llt.pageSelection.get' ||
     message.type === 'llt.modelPack.changed' ||
     message.type === 'llt.modelPack.status' ||
     message.type === 'llt.speechModelPack.changed'

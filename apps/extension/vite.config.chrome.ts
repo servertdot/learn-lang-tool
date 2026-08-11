@@ -12,11 +12,17 @@ export default mergeConfig(
       crx({
         manifest: {
           ...baseManifest,
+          mime_types_handler: {
+            'application/pdf': {
+              handler_url: 'src/pages/pdf/index.html',
+              can_embed: false,
+            },
+          },
           background: {
             service_worker: 'src/pages/background/index.ts',
             type: 'module'
           },
-        } as ManifestV3Export,
+        } as unknown as ManifestV3Export,
         browser: 'chrome',
         contentScripts: {
           injectCss: true,
@@ -29,6 +35,7 @@ export default mergeConfig(
       rollupOptions: {
         input: {
           offscreen: resolve(__dirname, 'src/pages/offscreen/index.html'),
+          pdf: resolve(__dirname, 'src/pages/pdf/index.html'),
         },
       },
     },

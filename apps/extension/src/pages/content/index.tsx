@@ -34,7 +34,11 @@ import {
 import type { PronunciationRequest } from '@src/lib/audio-tts-provider';
 import type { TranslationProvider } from '@package/shared';
 import { registerHoldHotkey } from '@src/lib/hold-hotkey';
-import { readPageTextSource, type PageTextSource } from '@src/lib/page-text-source';
+import {
+  readCurrentSelection,
+  readPageTextSource,
+  type PageTextSource,
+} from '@src/lib/page-text-source';
 import { handleTranslationTrigger } from '@src/lib/translation-trigger';
 import { requestOpenExtensionOptions } from '@src/lib/open-extension-options';
 import { formatApproxSize as formatSpeechSize } from '@src/lib/speech-model-pack-registry';
@@ -63,6 +67,19 @@ if (import.meta.hot) {
     if (mod?.default) styleEl.textContent = mod.default;
   });
 }
+
+chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+  const msg = message as LltMessage;
+  if (msg.type !== 'llt.pageSelection.get') return;
+
+  const selection = readCurrentSelection(window, document);
+  if (!selection) return;
+
+  sendResponse({
+    text: selection.text,
+    pageUrl: window.location.href,
+  });
+});
 
 interface PopoverData {
   state: PopoverState;

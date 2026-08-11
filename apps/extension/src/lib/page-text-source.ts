@@ -129,6 +129,25 @@ function readEditableSelection(document: Document): PageTextSource | null {
   };
 }
 
+export function readCurrentSelection(
+  window: Window,
+  document: Document,
+): PageTextSource | null {
+  const selection = window.getSelection();
+  const selectionText = normalizeText(selection?.toString() ?? '');
+  const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+  if (selectionText) {
+    return {
+      text: selectionText,
+      kind: 'selection',
+      range,
+      rect: range?.getBoundingClientRect() ?? null,
+    };
+  }
+
+  return readEditableSelection(document);
+}
+
 function readYouTubeCaption(document: Document, pageUrl: URL): PageTextSource | null {
   const isYouTube =
     pageUrl.hostname === 'youtube.com' || pageUrl.hostname.endsWith('.youtube.com');
@@ -194,20 +213,8 @@ async function readGoogleDocsClipboardSelection(
 export async function readPageTextSource(
   options: ReadPageTextSourceOptions,
 ): Promise<PageTextSource | null> {
-  const selection = options.window.getSelection();
-  const selectionText = normalizeText(selection?.toString() ?? '');
-  const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-  if (selectionText) {
-    return {
-      text: selectionText,
-      kind: 'selection',
-      range,
-      rect: range?.getBoundingClientRect() ?? null,
-    };
-  }
-
-  const editableSelection = readEditableSelection(options.document);
-  if (editableSelection) return editableSelection;
+  const currentSelection = readCurrentSelection(options.window, options.document);
+  if (currentSelection) return currentSelection;
 
   if (options.pointer) {
     const hoveredWord = readHoveredWord(options.document, options.pointer);
