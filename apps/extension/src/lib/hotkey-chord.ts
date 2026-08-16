@@ -19,9 +19,19 @@ export function normalizeHotkeyKey(key: string): string {
   return key;
 }
 
+function heldModifiers(event: KeyboardEvent): string[] {
+  const held: string[] = [];
+  if (event.ctrlKey) held.push('Control');
+  if (event.altKey) held.push('Alt');
+  if (event.shiftKey) held.push('Shift');
+  if (event.metaKey) held.push('Meta');
+  return held;
+}
+
 /**
  * Build a canonical chord string from a keyboard event.
- * Example: Control held + Alt pressed → "Control+Alt".
+ * Modifier-only chords are order-independent: Ctrl then Alt and Alt then Ctrl
+ * both become "Control+Alt".
  */
 export function hotkeyFromKeyboardEvent(event: KeyboardEvent): string | null {
   if (IGNORED_KEYS.has(event.key)) return null;
@@ -29,13 +39,13 @@ export function hotkeyFromKeyboardEvent(event: KeyboardEvent): string | null {
   const key = normalizeHotkeyKey(event.key);
   if (!key) return null;
 
-  const mods: string[] = [];
-  if (event.ctrlKey && key !== 'Control') mods.push('Control');
-  if (event.altKey && key !== 'Alt') mods.push('Alt');
-  if (event.shiftKey && key !== 'Shift') mods.push('Shift');
-  if (event.metaKey && key !== 'Meta') mods.push('Meta');
+  if (isModifierKey(key)) {
+    const held = new Set(heldModifiers(event));
+    held.add(key);
+    return canonicalizeHotkey([...held]);
+  }
 
-  return canonicalizeHotkey([...mods, key]);
+  return canonicalizeHotkey([...heldModifiers(event), key]);
 }
 
 export function parseHotkey(hotkey: string): string[] {
@@ -43,9 +53,16 @@ export function parseHotkey(hotkey: string): string[] {
 }
 
 export function canonicalizeHotkey(parts: string[]): string {
-  const normalized = parts.map(normalizeHotkeyKey);
+  const normalized = parts.map(normalizeHotkeyKey).filter(Boolean);
+  if (normalized.length === 0) return '';
+
+  if (normalized.every(isModifierKey)) {
+    const mods = new Set(normalized);
+    return MODIFIER_ORDER.filter(mod => mods.has(mod)).join('+');
+  }
+
   const key = normalized[normalized.length - 1];
-  if (!key) return '';
+  if (!key || isModifierKey(key)) return '';
 
   const mods = new Set(normalized.slice(0, -1).filter(isModifierKey));
   const orderedMods = MODIFIER_ORDER.filter(mod => mods.has(mod));
@@ -63,5 +80,5 @@ export function matchesHotkey(event: KeyboardEvent, hotkey: string): boolean {
 }
 
 export function formatHotkeyLabel(hotkey: string): string {
-  return parseHotkey(hotkey).join(' + ');
+  return canonicalizeHotkey(parseHotkey(hotkey)).split('+').join(' + ');
 }

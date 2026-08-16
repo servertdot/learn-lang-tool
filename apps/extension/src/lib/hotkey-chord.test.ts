@@ -18,9 +18,12 @@ describe('hotkeyFromKeyboardEvent', () => {
     expect(hotkeyFromKeyboardEvent(keyEvent({ key: 'Alt', altKey: true }))).toBe('Alt');
   });
 
-  it('captures modifier combinations from the final keydown', () => {
+  it('captures modifier combinations from either press order', () => {
     expect(
       hotkeyFromKeyboardEvent(keyEvent({ key: 'Alt', altKey: true, ctrlKey: true })),
+    ).toBe('Control+Alt');
+    expect(
+      hotkeyFromKeyboardEvent(keyEvent({ key: 'Control', altKey: true, ctrlKey: true })),
     ).toBe('Control+Alt');
   });
 
@@ -47,11 +50,11 @@ describe('matchesHotkey', () => {
     ).toBe(true);
   });
 
-  it('treats modifier order as which key is the trigger', () => {
+  it('treats modifier-only chords as order-independent', () => {
     expect(
       matchesHotkey(
-        keyEvent({ key: 'Alt', altKey: true, ctrlKey: true }),
-        'Control+Alt',
+        keyEvent({ key: 'Control', altKey: true, ctrlKey: true }),
+        'Alt+Control',
       ),
     ).toBe(true);
     expect(
@@ -59,15 +62,15 @@ describe('matchesHotkey', () => {
         keyEvent({ key: 'Alt', altKey: true, ctrlKey: true }),
         'Alt+Control',
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 
 describe('hotkey helpers', () => {
-  it('canonicalizes modifier order before the trigger key', () => {
+  it('canonicalizes modifier-only chords without a trigger key', () => {
     expect(canonicalizeHotkey(['Shift', 'Control', 'k'])).toBe('Control+Shift+k');
-    expect(canonicalizeHotkey(['Alt', 'Control'])).toBe('Alt+Control');
-    expect(formatHotkeyLabel('Control+Alt')).toBe('Control + Alt');
+    expect(canonicalizeHotkey(['Alt', 'Control'])).toBe('Control+Alt');
+    expect(formatHotkeyLabel('Alt+Control')).toBe('Control + Alt');
     expect(isModifierOnlyHotkey('Control+Alt')).toBe(true);
     expect(isModifierOnlyHotkey('Control+k')).toBe(false);
   });

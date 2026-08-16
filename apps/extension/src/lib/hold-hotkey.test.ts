@@ -39,10 +39,10 @@ describe('registerHoldHotkey', () => {
     unregister();
   });
 
-  it('matches modifier combinations', () => {
+  it('matches modifier combinations in either press order', () => {
     const onPress = vi.fn();
     const unregister = registerHoldHotkey(window, {
-      getHotkey: () => 'Control+Alt',
+      getHotkey: () => 'Alt+Control',
       isReady: () => true,
       onPress,
     });
@@ -51,7 +51,7 @@ describe('registerHoldHotkey', () => {
     expect(onPress).not.toHaveBeenCalled();
 
     window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Alt', altKey: true, ctrlKey: true }),
+      new KeyboardEvent('keydown', { key: 'Control', altKey: true, ctrlKey: true }),
     );
     expect(onPress).toHaveBeenCalledOnce();
     unregister();
