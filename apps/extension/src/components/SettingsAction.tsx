@@ -11,7 +11,7 @@ export function SettingsAction({ onOpen }: SettingsActionProps) {
       onClick={onOpen}
       title="Open settings"
       aria-label="Open settings"
-      className="grid size-5 place-items-center rounded border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
+      className="grid size-5 place-items-center rounded border border-white/[0.1] bg-white/[0.04] text-zinc-400 transition-colors hover:border-white/[0.16] hover:bg-white/[0.08] hover:text-zinc-100"
     >
       <svg className="size-2.5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path

@@ -22,7 +22,7 @@ export function AnkiActions({ addState, viewState, onAdd, onView }: AnkiActionsP
           aria-label={
             viewState === 'opening' ? 'Opening added note in Anki' : 'View added note in Anki'
           }
-          className="grid size-5 place-items-center rounded border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 disabled:cursor-wait disabled:opacity-50"
+          className="grid size-5 place-items-center rounded border border-white/[0.1] bg-white/[0.04] text-zinc-400 transition-colors hover:border-white/[0.16] hover:bg-white/[0.08] hover:text-zinc-100 disabled:cursor-wait disabled:opacity-50"
         >
           <svg className="size-2.5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path
@@ -59,8 +59,8 @@ export function AnkiActions({ addState, viewState, onAdd, onView }: AnkiActionsP
         }
         className={`grid size-5 place-items-center rounded transition-colors disabled:cursor-default disabled:opacity-70 ${
           addState === 'queued'
-            ? 'bg-amber-50 text-amber-700'
-            : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+            ? 'border border-amber-400/25 bg-amber-400/15 text-amber-300'
+            : 'border border-emerald-400/25 bg-emerald-400/15 text-emerald-300 hover:bg-emerald-400/25'
         }`}
       >
         <svg

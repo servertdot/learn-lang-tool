@@ -55,7 +55,7 @@ export function PronunciationControl({
       {showStatusText && (
         <span
           className={`text-[10px] leading-none ${
-            state === 'failed' || state === 'unsupported' ? 'text-rose-600' : 'text-slate-400'
+            state === 'failed' || state === 'unsupported' ? 'text-rose-300' : 'text-zinc-500'
           }`}
           role="status"
           aria-live="polite"
@@ -83,8 +83,8 @@ export function PronunciationControl({
         aria-label={accessibleName(state, contentLabel)}
         className={`grid size-5 place-items-center rounded border transition-colors disabled:cursor-default disabled:opacity-60 ${
           state === 'failed' || state === 'pack_missing'
-            ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
-            : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800'
+            ? 'border-amber-400/25 bg-amber-400/15 text-amber-300 hover:bg-amber-400/25'
+            : 'border-white/[0.1] bg-white/[0.04] text-zinc-400 hover:border-white/[0.16] hover:bg-white/[0.08] hover:text-zinc-100'
         }`}
       >
         {isPreparing ? (

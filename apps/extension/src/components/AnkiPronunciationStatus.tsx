@@ -26,7 +26,7 @@ export function AnkiPronunciationStatus({
   return (
     <div
       className={`mt-2 flex items-center justify-between gap-3 text-xs leading-relaxed ${
-        failed ? 'text-rose-600' : 'text-amber-700'
+        failed ? 'text-rose-300' : 'text-amber-300'
       }`}
       role={failed ? 'alert' : 'status'}
       aria-live="polite"

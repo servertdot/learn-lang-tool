@@ -115,11 +115,11 @@ export function TranslationPopover({
         top: position.y,
         zIndex: 2147483647,
       }}
-      className="llt-popover w-[min(360px,calc(100vw-24px))] overflow-hidden rounded-lg border border-slate-200/90 bg-white text-sm text-slate-950 shadow-[0_14px_36px_-20px_rgba(15,23,42,0.38)]"
+      className="llt-popover w-[min(360px,calc(100vw-24px))] overflow-hidden rounded-[14px] border border-white/[0.08] bg-[#2a2a2c] text-sm text-zinc-100 shadow-[0_18px_48px_rgba(0,0,0,0.45),0_2px_8px_rgba(0,0,0,0.28)]"
     >
       {state.kind === 'loading' && (
         <div className="flex items-center gap-3 px-4 py-4" role="status" aria-live="polite">
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
+          <span className="grid size-9 shrink-0 place-items-center rounded-[10px] border border-white/[0.08] bg-white/[0.04] text-zinc-300">
             <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path
                 d="M21 12a9 9 0 1 1-2.64-6.36"
@@ -130,20 +130,20 @@ export function TranslationPopover({
             </svg>
           </span>
           <div className="min-w-0 flex-1">
-            <p className="font-semibold tracking-[-0.01em] text-slate-800">Translating</p>
-            <p className="mt-0.5 text-xs text-slate-500">Finding the clearest meaning…</p>
+            <p className="font-semibold tracking-[-0.01em] text-zinc-100">Translating</p>
+            <p className="mt-0.5 text-xs text-zinc-400">Finding the clearest meaning…</p>
           </div>
           <span className="flex gap-1" aria-hidden="true">
-            <span className="llt-loading-dot size-1.5 rounded-full bg-indigo-400" />
-            <span className="llt-loading-dot size-1.5 rounded-full bg-indigo-400" />
-            <span className="llt-loading-dot size-1.5 rounded-full bg-indigo-400" />
+            <span className="llt-loading-dot size-1.5 rounded-full bg-zinc-400" />
+            <span className="llt-loading-dot size-1.5 rounded-full bg-zinc-400" />
+            <span className="llt-loading-dot size-1.5 rounded-full bg-zinc-400" />
           </span>
         </div>
       )}
 
       {state.kind === 'error' && (
         <div className="flex items-start gap-3 px-4 py-4" role="alert">
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-rose-50 text-rose-600">
+          <span className="grid size-9 shrink-0 place-items-center rounded-[10px] border border-rose-400/20 bg-rose-400/10 text-rose-300">
             <svg className="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path
                 d="M12 8v4m0 4h.01M10.3 3.84 2.82 17a2 2 0 0 0 1.74 3h14.88a2 2 0 0 0 1.74-3L13.7 3.84a2 2 0 0 0-3.4 0Z"
@@ -155,13 +155,13 @@ export function TranslationPopover({
             </svg>
           </span>
           <div className="min-w-0 flex-1 pt-0.5">
-            <p className="font-semibold tracking-[-0.01em] text-slate-800">Couldn’t translate</p>
-            <p className="mt-1 text-xs leading-relaxed text-slate-500">{state.message}</p>
+            <p className="font-semibold tracking-[-0.01em] text-zinc-100">Couldn’t translate</p>
+            <p className="mt-1 text-xs leading-relaxed text-zinc-400">{state.message}</p>
             {state.code === 'model_pack_missing' && onInstallModelPack && (
               <button
                 type="button"
                 onClick={onInstallModelPack}
-                className="mt-3 w-full rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-600"
+                className="mt-3 w-full rounded-[10px] bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-900 hover:bg-white"
               >
                 Download model pack
               </button>
@@ -173,7 +173,7 @@ export function TranslationPopover({
       {state.kind === 'success' && (
         <div className="px-4 py-4">
           <div className="flex min-h-5 items-center justify-between gap-3">
-            <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
+            <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-zinc-500">
               Translation
             </p>
             <div className="flex items-center gap-1">
@@ -200,13 +200,13 @@ export function TranslationPopover({
           </div>
 
           {(ankiState === 'error' || ankiViewState === 'error') && ankiError && (
-            <p className="mb-3 text-xs leading-relaxed text-rose-600" role="alert">
+            <p className="mb-3 text-xs leading-relaxed text-rose-300" role="alert">
               {ankiError}
             </p>
           )}
 
           {ankiState === 'queued' && (
-            <p className="mb-3 text-xs leading-relaxed text-amber-700" role="status">
+            <p className="mb-3 text-xs leading-relaxed text-amber-300" role="status">
               Saved locally. It will sync when Anki is open.
             </p>
           )}
@@ -220,16 +220,16 @@ export function TranslationPopover({
           )}
 
           <p
-            className="mt-1 text-[15px] font-medium leading-relaxed text-slate-900"
+            className="mt-1 text-[15px] font-medium leading-relaxed text-zinc-50"
             aria-live="polite"
           >
             {state.data.translated_text}
           </p>
 
-          <div className="my-3 border-t border-slate-200" />
+          <div className="my-3 border-t border-white/[0.08]" />
 
           <div className="flex min-h-5 items-center justify-between gap-3">
-            <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
+            <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-zinc-500">
               Original
             </p>
             {pronunciationState && (
@@ -245,7 +245,7 @@ export function TranslationPopover({
               />
             )}
           </div>
-          <p className="mt-1 text-[13px] leading-relaxed text-slate-600">
+          <p className="mt-1 text-[13px] leading-relaxed text-zinc-400">
             {state.data.source_text}
           </p>
         </div>

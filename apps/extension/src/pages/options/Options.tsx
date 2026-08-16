@@ -380,10 +380,10 @@ export default function Options() {
         </div>
 
         <div className="hero-copy">
-          <p className="eyebrow eyebrow-light">Settings / 01</p>
-          <h1>Make every page part of your <em>language practice.</em></h1>
+          <p className="eyebrow eyebrow-light">Settings</p>
+          <h1>Make every page part of your <em>language practice</em></h1>
           <p className="hero-description">
-            Tune the way Learn Lang translates, responds, and turns useful phrases into cards.
+            Tune how Learn Lang translates, responds, and turns useful phrases into cards.
           </p>
           <nav className="hero-nav" aria-label="Settings sections">
             <a href="#translation"><span>01</span> Translation</a>
@@ -391,18 +391,13 @@ export default function Options() {
           </nav>
         </div>
 
-        <div className="hero-landscape" aria-hidden="true">
-          <div className="sun" />
-          <div className="mountain mountain-back" />
-          <div className="mountain mountain-front" />
-          <div className="hill" />
-        </div>
+        <div className="hero-footer">Private by default · Built for focused practice</div>
       </aside>
 
       <main id="top" className="options-content">
         <header className="content-intro">
           <p className="eyebrow">Personal workspace</p>
-          <h2>Settings that feel like yours.</h2>
+          <h2>Settings that feel like yours</h2>
           <p>Changes stay with your browser profile and follow you through extension sync.</p>
         </header>
 

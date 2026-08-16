@@ -60,9 +60,9 @@ export function PopupTranslationResult({
   onRetryAnkiPronunciation,
 }: PopupTranslationResultProps) {
   return (
-    <section className="bg-white p-4">
+    <section className="bg-[#2a2a2c] p-4 text-zinc-100">
       <div className="flex min-h-5 items-center justify-between gap-3">
-        <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
+        <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-zinc-500">
           Translation
         </p>
         <div className="flex items-center gap-1">
@@ -87,16 +87,16 @@ export function PopupTranslationResult({
           <SettingsAction onOpen={onOpenSettings} />
         </div>
       </div>
-      <p className="mt-1 text-[15px] font-medium leading-relaxed">{result.translated_text}</p>
+      <p className="mt-1 text-[15px] font-medium leading-relaxed text-zinc-50">{result.translated_text}</p>
 
       {(ankiState === 'error' || ankiViewState === 'error') && ankiError && (
-        <p className="mt-2 text-xs leading-relaxed text-rose-600" role="alert">
+        <p className="mt-2 text-xs leading-relaxed text-rose-300" role="alert">
           {ankiError}
         </p>
       )}
 
       {ankiState === 'queued' && (
-        <p className="mt-2 text-xs leading-relaxed text-amber-700" role="status">
+        <p className="mt-2 text-xs leading-relaxed text-amber-300" role="status">
           Saved locally. It will sync when Anki is open.
         </p>
       )}
@@ -109,9 +109,9 @@ export function PopupTranslationResult({
         />
       )}
 
-      <div className="my-3 border-t border-slate-200" />
+      <div className="my-3 border-t border-white/[0.08]" />
       <div className="flex min-h-5 items-center justify-between gap-3">
-        <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400">
+        <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-zinc-500">
           Original
         </p>
         {pronunciationState && (
@@ -127,7 +127,7 @@ export function PopupTranslationResult({
           />
         )}
       </div>
-      <p className="mt-1 text-xs leading-relaxed text-slate-600">{result.source_text}</p>
+      <p className="mt-1 text-xs leading-relaxed text-zinc-400">{result.source_text}</p>
     </section>
   );
 }

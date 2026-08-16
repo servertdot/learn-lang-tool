@@ -309,11 +309,11 @@ export default function Popup() {
   };
 
   return (
-    <main className="bg-white text-slate-950">
+    <main className="bg-[#2a2a2c] text-zinc-100">
       {state.kind === 'empty' && (
         <section className="p-4">
-          <p className="text-sm font-medium">Translate text from any page</p>
-          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+          <p className="text-sm font-medium text-zinc-100">Translate text from any page</p>
+          <p className="mt-2 text-xs leading-relaxed text-zinc-400">
             Select text, then click the extension icon again. You can also right-click the text
             and choose <strong>Translate selection</strong>. Use the right-click action if your
             browser PDF viewer blocks direct selection access.
@@ -323,9 +323,9 @@ export default function Popup() {
 
       {state.kind === 'loading' && (
         <section className="p-4" role="status">
-          <p className="text-sm font-semibold text-indigo-700">Translating…</p>
+          <p className="text-sm font-semibold text-zinc-100">Translating…</p>
           {state.sourceText && (
-            <p className="mt-3 line-clamp-4 text-xs leading-relaxed text-slate-500">
+            <p className="mt-3 line-clamp-4 text-xs leading-relaxed text-zinc-400">
               {state.sourceText}
             </p>
           )}
@@ -369,12 +369,12 @@ export default function Popup() {
 
       {state.kind === 'error' && (
         <section className="p-4" role="alert">
-          <p className="text-sm font-semibold text-rose-700">Couldn’t translate</p>
-          <p className="mt-1 text-xs leading-relaxed text-slate-500">{state.message}</p>
+          <p className="text-sm font-semibold text-zinc-100">Couldn’t translate</p>
+          <p className="mt-1 text-xs leading-relaxed text-zinc-400">{state.message}</p>
           <button
             type="button"
             onClick={() => void chrome.runtime.openOptionsPage()}
-            className="mt-3 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white"
+            className="mt-3 rounded-[10px] bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-900 hover:bg-white"
           >
             Open settings
           </button>
