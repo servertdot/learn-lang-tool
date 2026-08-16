@@ -2,6 +2,12 @@
 
 All notable changes to Learn Lang Tool are documented in this file.
 
+## 1.0.5 - 2026-08-16
+
+### Improvements
+
+- Set the hold-to-translate hotkey by pressing a key or key combination in settings.
+
 ## 1.0.4 - 2026-08-11
 
 ### Fixes
