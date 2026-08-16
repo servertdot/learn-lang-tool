@@ -2,6 +2,12 @@
 
 All notable changes to Learn Lang Tool are documented in this file.
 
+## 1.0.6 - 2026-08-16
+
+### Fixes
+
+- Treat modifier-only hold-to-translate chords as order-independent (e.g. Alt+Control and Control+Alt).
+
 ## 1.0.5 - 2026-08-16
 
 ### Improvements
