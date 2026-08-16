@@ -14,7 +14,7 @@ describe('registerHoldHotkey', () => {
     document.addEventListener('keydown', event => event.stopPropagation(), { once: true });
 
     document.body.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Alt', bubbles: true, composed: true }),
+      new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true, composed: true }),
     );
 
     expect(onPress).toHaveBeenCalledOnce();
@@ -30,12 +30,30 @@ describe('registerHoldHotkey', () => {
       onPress,
     });
 
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true }));
     ready = true;
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' }));
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', repeat: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', shiftKey: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true, repeat: true }));
 
     expect(onPress).not.toHaveBeenCalled();
+    unregister();
+  });
+
+  it('matches modifier combinations', () => {
+    const onPress = vi.fn();
+    const unregister = registerHoldHotkey(window, {
+      getHotkey: () => 'Control+Alt',
+      isReady: () => true,
+      onPress,
+    });
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true }));
+    expect(onPress).not.toHaveBeenCalled();
+
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Alt', altKey: true, ctrlKey: true }),
+    );
+    expect(onPress).toHaveBeenCalledOnce();
     unregister();
   });
 });

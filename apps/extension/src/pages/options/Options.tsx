@@ -29,6 +29,7 @@ import type { AnkiDuplicateConflict } from '@src/lib/anki-queue-sync';
 import { translationProviderPrivacyCopy } from '@src/lib/translation-provider-privacy';
 import type { AnkiDuplicateDecision } from '@src/lib/extension-messages';
 import { AnkiDuplicateDialog } from '@src/components/AnkiDuplicateDialog';
+import { HotkeyCapture } from '@src/components/HotkeyCapture';
 import type { LanguagePair, TranslationProvider } from '@package/shared';
 import {
   DEFAULT_LANGUAGE_PAIR,
@@ -47,8 +48,6 @@ import {
 import type { ModelPackStatus } from '@src/lib/model-pack-store';
 import type { LltMessage } from '@src/lib/extension-messages';
 import '@pages/options/Options.css';
-
-const MODIFIER_KEYS = ['Alt', 'Control', 'Shift', 'Meta'];
 
 const ANKI_FIELD_VALUE_OPTIONS: { value: AnkiFieldValue; label: string }[] = [
   { value: 'textFrom', label: 'Text from' },
@@ -458,16 +457,15 @@ export default function Options() {
 
             <div className="form-field form-field-wide">
               <label htmlFor="translation-hotkey">Hold-to-translate key</label>
-              <select
+              <HotkeyCapture
                 id="translation-hotkey"
                 value={hotkey}
-                onChange={e => setHotkeyState(e.target.value)}
-              >
-                {MODIFIER_KEYS.map(key => (
-                  <option key={key} value={key}>{key}</option>
-                ))}
-              </select>
-              <p className="field-note">Hold this modifier while selecting or pointing at a word.</p>
+                onChange={setHotkeyState}
+              />
+              <p className="field-note">
+                Click the field, then press a key or combination. Hold it while selecting or
+                pointing at a word.
+              </p>
             </div>
 
             <div className="form-action form-field-wide">

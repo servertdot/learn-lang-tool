@@ -1,3 +1,5 @@
+import { matchesHotkey } from './hotkey-chord';
+
 export interface HoldHotkeyOptions {
   getHotkey(): string;
   isReady(): boolean;
@@ -14,7 +16,7 @@ export function registerHoldHotkey(
 ): () => void {
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.repeat || !options.isReady()) return;
-    if (event.key !== options.getHotkey()) return;
+    if (!matchesHotkey(event, options.getHotkey())) return;
 
     event.preventDefault();
     options.onPress(event);

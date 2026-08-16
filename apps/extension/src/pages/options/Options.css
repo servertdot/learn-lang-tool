@@ -368,6 +368,7 @@ select:disabled {
 .form-field input:focus,
 .form-field select:focus,
 .field-mapping-row select:focus,
+.hotkey-capture-button:focus-visible,
 .button:focus-visible,
 .danger-link:focus-visible,
 .hero-nav a:focus-visible,
@@ -395,6 +396,59 @@ select:disabled {
   color: var(--faint);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.hotkey-capture {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.hotkey-capture-button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background-color: rgb(255 255 255 / 4%);
+  color: var(--ink);
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.hotkey-capture-button:hover {
+  background-color: rgb(255 255 255 / 6%);
+  border-color: rgb(255 255 255 / 18%);
+}
+
+.hotkey-capture-button.is-capturing {
+  border-color: rgb(126 176 255 / 45%);
+  background-color: var(--accent-soft);
+  box-shadow: 0 0 0 1px rgb(126 176 255 / 20%);
+}
+
+.hotkey-capture-button kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.hotkey-capture-cancel {
+  flex-shrink: 0;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+
+.hotkey-capture-cancel:hover {
+  color: var(--ink);
+  background-color: rgb(255 255 255 / 6%);
 }
 
 .language-input {
