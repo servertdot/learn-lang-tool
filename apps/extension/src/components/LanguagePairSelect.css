@@ -1,0 +1,14 @@
+.language-pair-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+}
+
+.language-pair-field {
+  min-width: 0;
+}
+
+.language-pair-field label {
+  display: block;
+}

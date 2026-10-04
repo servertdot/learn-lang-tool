@@ -7,6 +7,7 @@ import Popup from './Popup';
 const mocks = vi.hoisted(() => ({
   selection: vi.fn(),
   pair: vi.fn(),
+  setPair: vi.fn(async (pair: { from_code: string; to_code: string }) => pair),
   translate: vi.fn(),
   prepare: vi.fn(),
 }));
@@ -14,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@src/lib/popup-selection', () => ({ getPopupSelection: mocks.selection }));
 vi.mock('@src/lib/storage', () => ({
   getLanguagePair: mocks.pair,
+  setLanguagePair: mocks.setPair,
+  subscribeLanguagePair: vi.fn(() => () => undefined),
   getTranslationProvider: vi.fn(async () => 'google'),
 }));
 vi.mock('@src/lib/product-translator', () => ({

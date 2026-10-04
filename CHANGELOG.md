@@ -2,6 +2,21 @@
 
 All notable changes to Learn Lang Tool are documented in this file.
 
+## 1.0.8 - 2026-10-04
+
+### Improvements
+
+- Add Auto-Detect to the source language selector for Google Translate.
+- Save language choices automatically and synchronize them between settings, the toolbar translator, and page translations.
+- Use the detected source language for pronunciation and Anki cards.
+- Switch an Auto-Detect source to English when choosing Bergamot.
+
+### Fixes
+
+- Keep Auto-Detect out of the target language selector and prevent swapping it into the target.
+- Cancel outdated translations when the shared language pair changes.
+- Preserve saved languages and report storage failures so language changes can be retried.
+
 ## 1.0.7 - 2026-10-04
 
 ### Improvements

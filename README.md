@@ -18,6 +18,20 @@ The goal is to help you learn expressions in the context where you found them—
 - Capture text from regular web pages, Google Docs, YouTube subtitles, and the built-in PDF viewer.
 - Configure the language pair, translation provider, hotkey, Anki connection, and pronunciation settings.
 
+## Screenshots
+
+### Toolbar translator
+
+Type or paste text, choose the language pair, and translate from the extension toolbar.
+
+<img src="docs/screenshots/translator-mode.png" alt="LLT toolbar translator showing an English sentence and its Spanish translation, with language selectors and Translate and Copy controls" width="360" />
+
+### Translation popover on a page
+
+Translate a selection while reading. The popover shows the translation and original text, with pronunciation and **Add to Anki** controls. Shown here on a sample article.
+
+![LLT translation popover beneath a highlighted sentence on a sample article, showing the Spanish translation, original English text, pronunciation buttons, and Add to Anki control](docs/screenshots/translation-popover.png)
+
 ## How LLT works
 
 1. Select text on a page, or hold the configured hotkey over a word.
@@ -41,7 +55,7 @@ Google Translate receives the selected text when it is the active provider. With
 
 Click the pinned extension icon to open a translator with Source and Target fields. Any selected page text is filled into Source and translated automatically into Target; otherwise the field starts empty. Edit, type, or paste up to 2,000 characters, choose the languages, and click **Translate** or press **Ctrl/⌘ + Enter** to translate again. Use the swap button to reverse the direction and **Copy** to copy the result. The context-menu **Translate selection** action still translates immediately; **Open translator** switches from that result to the translator with the original text filled in and translated automatically.
 
-The translator starts with your configured language pair and uses your selected provider. Language changes in this window apply only to that session. Bergamot requires an installed model pack for the chosen pair.
+The translator starts with your configured language pair and uses your selected provider. Language changes save automatically and are shared with Options and page translations. Choose **Auto-Detect** as the source language with Google Translate to detect the language in the same translation request, with no extra request or fee through the current web endpoint. The detected language is used for pronunciation and Anki; your source setting stays Auto-Detect. Choose a specific source language to enable swapping. Switching to Bergamot changes an Auto-Detect source to English. Bergamot requires an installed model pack for the chosen pair. Detection can be ambiguous for short words, so you can always choose the source language manually.
 
 ### Special text sources
 

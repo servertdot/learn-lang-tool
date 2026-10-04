@@ -21,7 +21,7 @@ describe('Google translation client', () => {
       fetch: fetchMock,
     });
 
-    expect(result).toBe('привет');
+    expect(result).toEqual({ translatedText: 'привет', fromCode: 'en' });
     expect(fetchMock).toHaveBeenCalledOnce();
     const url = new URL(fetchMock.mock.calls[0][0] as string);
     expect(url.origin).toBe('https://translate.google.com');
@@ -40,7 +40,32 @@ describe('Google translation client', () => {
       translateWithGoogle('how are things', 'en', 'ru', undefined, {
         fetch: vi.fn().mockResolvedValue(response),
       }),
-    ).resolves.toBe('как дела');
+    ).resolves.toEqual({ translatedText: 'как дела', fromCode: 'en' });
+  });
+
+  it('detects the source language in the same translation request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify([[['привет', 'hola']], null, 'es']),
+    ));
+    await expect(translateWithGoogle('hola', 'auto', 'ru', undefined, { fetch: fetchMock }))
+      .resolves.toEqual({ translatedText: 'привет', fromCode: 'es' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(new URL(fetchMock.mock.calls[0][0] as string).searchParams.get('sl')).toBe('auto');
+  });
+
+  it.each([undefined, 'auto', 'und', 'not-a-language', 42])(
+    'rejects an auto-detected response without a valid source language (%s)', async detected => {
+      await expect(translateWithGoogle('hola', 'auto', 'ru', undefined, {
+        fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify([[['привет']], null, detected]))),
+      })).rejects.toMatchObject({ kind: 'response' });
+    },
+  );
+
+  it('rejects auto as a target language before making a request', async () => {
+    const fetchMock = vi.fn();
+    await expect(translateWithGoogle('hello', 'en', 'auto', undefined, { fetch: fetchMock }))
+      .rejects.toMatchObject({ kind: 'invalid_request' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects invalid language codes before making a request', async () => {

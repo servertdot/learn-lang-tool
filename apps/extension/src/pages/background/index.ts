@@ -801,10 +801,10 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
 
         remoteTranslateAborts.delete(message.requestId);
 
-        const pack = getModelPackForLanguagePair({
-          from_code: message.request.from_code,
-          to_code: message.request.to_code,
-        });
+        const request = message.request.from_code === 'auto'
+          ? { ...message.request, from_code: 'en' }
+          : message.request;
+        const pack = getModelPackForLanguagePair(request);
 
         if (!pack) {
           const errorMsg: LltMessage = {
@@ -812,7 +812,7 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
             requestId: message.requestId,
             error: {
               code: 'engine_failure',
-              message: `No model pack for ${message.request.from_code}→${message.request.to_code}`,
+              message: `No model pack for ${request.from_code}→${request.to_code}`,
             },
           };
           sendResponse(errorMsg);
@@ -837,7 +837,7 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
         lltLog('bg', 'offscreen translate…');
         const response = await sendToOffscreen({
           type: 'llt.offscreen.translate',
-          request: message.request,
+          request,
           requestId: message.requestId,
         });
         lltLog('bg', 'offscreen ←', response);

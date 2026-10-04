@@ -7,7 +7,7 @@ export function createGoogleTranslationEngine(
 ): TranslationEngine {
   return {
     async translate(request: TranslateRequest, signal?: AbortSignal): Promise<TranslateResponse> {
-      const translatedText = await translateWithGoogle(
+      const translation = await translateWithGoogle(
         request.text,
         request.from_code,
         request.to_code,
@@ -17,8 +17,8 @@ export function createGoogleTranslationEngine(
 
       return {
         source_text: request.text,
-        translated_text: translatedText,
-        from_code: request.from_code,
+        translated_text: translation.translatedText,
+        from_code: translation.fromCode,
         to_code: request.to_code,
         can_add_to_anki: true,
       };

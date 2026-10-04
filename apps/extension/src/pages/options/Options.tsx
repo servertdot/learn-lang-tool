@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   getAnkiSettings,
-  getLanguagePair,
   setAnkiSettings,
-  setLanguagePair,
   getHotkey,
   setHotkey,
   getTranslationProvider,
@@ -30,9 +28,10 @@ import { translationProviderPrivacyCopy } from '@src/lib/translation-provider-pr
 import type { AnkiDuplicateDecision } from '@src/lib/extension-messages';
 import { AnkiDuplicateDialog } from '@src/components/AnkiDuplicateDialog';
 import { HotkeyCapture } from '@src/components/HotkeyCapture';
-import type { LanguagePair, TranslationProvider } from '@package/shared';
+import { LanguagePairSelect } from '@src/components/LanguagePairSelect';
+import { useLanguagePair } from '@src/lib/use-language-pair';
+import type { TranslationProvider } from '@package/shared';
 import {
-  DEFAULT_LANGUAGE_PAIR,
   DEFAULT_HOTKEY,
   DEFAULT_TRANSLATION_PROVIDER,
 } from '@package/shared';
@@ -47,7 +46,7 @@ import {
 } from '@src/lib/messaging-translation-engine';
 import type { ModelPackStatus } from '@src/lib/model-pack-store';
 import type { LltMessage } from '@src/lib/extension-messages';
-import '@pages/options/Options.css';
+import './Options.css';
 
 const ANKI_FIELD_VALUE_OPTIONS: { value: AnkiFieldValue; label: string }[] = [
   { value: 'textFrom', label: 'Text from' },
@@ -57,7 +56,7 @@ const ANKI_FIELD_VALUE_OPTIONS: { value: AnkiFieldValue; label: string }[] = [
 ];
 
 export default function Options() {
-  const [pair, setPair] = useState<LanguagePair>(DEFAULT_LANGUAGE_PAIR);
+  const { pair, ready: languagesReady, saving: languagesSaving, error: languageError, changePair } = useLanguagePair();
   const [hotkey, setHotkeyState] = useState(DEFAULT_HOTKEY);
   const [provider, setProvider] = useState<TranslationProvider>(DEFAULT_TRANSLATION_PROVIDER);
   const [saved, setSaved] = useState(false);
@@ -91,8 +90,7 @@ export default function Options() {
   }
 
   useEffect(() => {
-    Promise.all([getLanguagePair(), getHotkey(), getTranslationProvider()]).then(([p, k, value]) => {
-      setPair(p);
+    Promise.all([getHotkey(), getTranslationProvider()]).then(([k, value]) => {
       setHotkeyState(k);
       setProvider(value);
     });
@@ -142,7 +140,6 @@ export default function Options() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     await Promise.all([
-      setLanguagePair(pair),
       setHotkey(hotkey),
       setTranslationProvider(provider),
     ]);
@@ -415,7 +412,13 @@ export default function Options() {
               <select
                 id="translation-provider"
                 value={provider}
-                onChange={e => setProvider(e.target.value as TranslationProvider)}
+                onChange={e => {
+                  const next = e.target.value as TranslationProvider;
+                  setProvider(next);
+                  if (next === 'bergamot' && pair.from_code === 'auto') {
+                    void changePair({ ...pair, from_code: 'en' });
+                  }
+                }}
               >
                 <option value="google">Google Translate — better quality</option>
                 <option value="bergamot">Bergamot — private and offline</option>
@@ -425,34 +428,21 @@ export default function Options() {
               </p>
             </div>
 
-            <div className="form-field">
-              <label htmlFor="source-language">Source language</label>
-              <div className="language-input">
-                <input
-                  id="source-language"
-                  type="text"
-                  value={pair.from_code}
-                  onChange={e => setPair(p => ({ ...p, from_code: e.target.value.toLowerCase() }))}
-                  placeholder="e.g. en"
-                  maxLength={8}
-                />
-                <span>FROM</span>
-              </div>
-            </div>
-
-            <div className="form-field">
-              <label htmlFor="target-language">Target language</label>
-              <div className="language-input">
-                <input
-                  id="target-language"
-                  type="text"
-                  value={pair.to_code}
-                  onChange={e => setPair(p => ({ ...p, to_code: e.target.value.toLowerCase() }))}
-                  placeholder="e.g. ru"
-                  maxLength={8}
-                />
-                <span>TO</span>
-              </div>
+            <div className="form-field-wide">
+              <LanguagePairSelect
+                pair={pair}
+                disabled={!languagesReady || languagesSaving}
+                fieldClassName="form-field"
+                swapClassName="button button-secondary language-swap"
+                onChange={next => {
+                  void changePair(provider === 'bergamot' && next.from_code === 'auto'
+                    ? { ...next, from_code: 'en' }
+                    : next);
+                }}
+                onSwap={() => { void changePair({ from_code: pair.to_code, to_code: pair.from_code }); }}
+              />
+              <p className="field-note">Languages save automatically and apply to the toolbar translator too.</p>
+              {languageError && <p role="alert" className="field-note">{languageError}</p>}
             </div>
 
             <div className="form-field form-field-wide">

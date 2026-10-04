@@ -4,7 +4,7 @@ import { getGoogleTranslateToken } from '../vendor/googletrans/google-token';
 const GOOGLE_TRANSLATE_URL = 'https://translate.google.com/translate_a/single';
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
-const LANGUAGE_CODE_PATTERN = /^(?:auto|[a-z]{2,3}(?:-[a-z0-9]{2,8})*)$/i;
+const LANGUAGE_CODE_PATTERN = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i;
 
 export class GoogleTranslationError extends Error {
   constructor(
@@ -24,7 +24,7 @@ export interface GoogleTranslationClientOptions {
 
 function assertLanguageCode(value: string, field: 'from_code' | 'to_code'): string {
   const normalized = value.trim().toLowerCase();
-  if (!LANGUAGE_CODE_PATTERN.test(normalized)) {
+  if (!(field === 'from_code' && normalized === 'auto') && !LANGUAGE_CODE_PATTERN.test(normalized)) {
     throw new GoogleTranslationError('invalid_request', `Invalid ${field}`);
   }
   return normalized;
@@ -87,7 +87,12 @@ async function readBoundedText(response: Response, maxBytes: number): Promise<st
   }
 }
 
-function parseTranslatedText(payload: unknown): string {
+export interface GoogleTranslationResult {
+  translatedText: string;
+  fromCode: string;
+}
+
+function parseTranslation(payload: unknown, fromCode: string): GoogleTranslationResult {
   if (!Array.isArray(payload) || !Array.isArray(payload[0])) {
     throw new GoogleTranslationError('response', 'Unexpected response from Google Translate');
   }
@@ -101,7 +106,14 @@ function parseTranslatedText(payload: unknown): string {
   if (!translated) {
     throw new GoogleTranslationError('response', 'Google Translate returned no translation');
   }
-  return translated;
+  if (fromCode === 'auto') {
+    const detected = typeof payload[2] === 'string' ? payload[2].trim().toLowerCase() : '';
+    if (!LANGUAGE_CODE_PATTERN.test(detected) || detected === 'auto' || detected === 'und') {
+      throw new GoogleTranslationError('response', 'Could not detect the source language. Choose a source language and try again.');
+    }
+    return { translatedText: translated, fromCode: detected };
+  }
+  return { translatedText: translated, fromCode };
 }
 
 export async function translateWithGoogle(
@@ -110,7 +122,7 @@ export async function translateWithGoogle(
   toCode: string,
   signal?: AbortSignal,
   options: GoogleTranslationClientOptions = {},
-): Promise<string> {
+): Promise<GoogleTranslationResult> {
   if (!text || text.length > MAX_TRANSLATION_TEXT_LENGTH) {
     throw new GoogleTranslationError(
       'invalid_request',
@@ -158,7 +170,7 @@ export async function translateWithGoogle(
     } catch {
       throw new GoogleTranslationError('response', 'Invalid JSON from Google Translate');
     }
-    return parseTranslatedText(payload);
+    return parseTranslation(payload, from);
   } catch (error) {
     if (timedOut) {
       throw new GoogleTranslationError('timeout', 'Google Translate request timed out');

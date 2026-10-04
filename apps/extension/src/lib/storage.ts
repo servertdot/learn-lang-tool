@@ -21,11 +21,38 @@ const KEYS = {
 
 export async function getLanguagePair(): Promise<LanguagePair> {
   const result = await browser.storage.sync.get(KEYS.languagePair);
-  return (result[KEYS.languagePair] as LanguagePair | undefined) ?? DEFAULT_LANGUAGE_PAIR;
+  const pair = normalizeLanguagePair(result[KEYS.languagePair] as LanguagePair | undefined);
+  const provider = await getTranslationProvider();
+  return provider === 'bergamot' && pair.from_code === 'auto'
+    ? { ...pair, from_code: 'en' }
+    : pair;
 }
 
-export async function setLanguagePair(pair: LanguagePair): Promise<void> {
-  await browser.storage.sync.set({ [KEYS.languagePair]: pair });
+function normalizeLanguagePair(pair: LanguagePair | undefined): LanguagePair {
+  return {
+    from_code: pair?.from_code?.trim().toLowerCase() || DEFAULT_LANGUAGE_PAIR.from_code,
+    to_code: pair?.to_code?.trim().toLowerCase() === 'auto'
+      ? DEFAULT_LANGUAGE_PAIR.to_code
+      : pair?.to_code?.trim().toLowerCase() || DEFAULT_LANGUAGE_PAIR.to_code,
+  };
+}
+
+export async function setLanguagePair(pair: LanguagePair): Promise<LanguagePair> {
+  const next = normalizeLanguagePair(pair);
+  if (await getTranslationProvider() === 'bergamot' && next.from_code === 'auto') {
+    next.from_code = 'en';
+  }
+  await browser.storage.sync.set({ [KEYS.languagePair]: next });
+  return next;
+}
+
+export function subscribeLanguagePair(onChange: (pair: LanguagePair) => void): () => void {
+  const listener = (changes: Record<string, browser.Storage.StorageChange>, area: string) => {
+    if (area !== 'sync' || !changes[KEYS.languagePair]) return;
+    onChange(normalizeLanguagePair(changes[KEYS.languagePair].newValue as LanguagePair | undefined));
+  };
+  browser.storage.onChanged.addListener(listener);
+  return () => browser.storage.onChanged.removeListener(listener);
 }
 
 export async function getHotkey(): Promise<string> {
@@ -46,7 +73,13 @@ export async function getTranslationProvider(): Promise<TranslationProvider> {
 }
 
 export async function setTranslationProvider(provider: TranslationProvider): Promise<void> {
-  await browser.storage.sync.set({ [KEYS.translationProvider]: provider });
+  const values: Record<string, unknown> = { [KEYS.translationProvider]: provider };
+  if (provider === 'bergamot') {
+    const stored = await browser.storage.sync.get(KEYS.languagePair);
+    const pair = normalizeLanguagePair(stored[KEYS.languagePair] as LanguagePair | undefined);
+    if (pair.from_code === 'auto') values[KEYS.languagePair] = { ...pair, from_code: 'en' };
+  }
+  await browser.storage.sync.set(values);
 }
 
 export async function getAnkiSettings(): Promise<AnkiSettings> {
