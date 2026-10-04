@@ -86,7 +86,7 @@ describe('getPopupSelection', () => {
       readActiveTabSelection,
     });
 
-    expect(selection?.text).toBe('context-menu selection');
+    expect(selection).toEqual({ text: 'context-menu selection', trigger: 'selection-action' });
     expect(readActiveTabSelection).not.toHaveBeenCalled();
   });
 
@@ -96,6 +96,6 @@ describe('getPopupSelection', () => {
       readActiveTabSelection: async () => ({ text: 'live selection' }),
     });
 
-    expect(selection?.text).toBe('live selection');
+    expect(selection).toEqual({ text: 'live selection', trigger: 'toolbar' });
   });
 });

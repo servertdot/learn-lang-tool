@@ -16,6 +16,7 @@ import { getLanguagePair, getTranslationProvider } from '@src/lib/storage';
 import { getPopupSelection } from '@src/lib/popup-selection';
 import { formatApproxSize } from '@src/lib/speech-model-pack-registry';
 import { PopupTranslationResult } from './PopupTranslationResult';
+import { PopupTranslator } from './PopupTranslator';
 import type { AnkiAddState, AnkiViewState } from '@src/components/AnkiActions';
 import type { PronunciationControlState } from '@src/components/PronunciationControl';
 import { stopBrowserSpeech } from '@src/lib/browser-speech';
@@ -25,12 +26,12 @@ type PopupState =
   | { kind: 'loading'; sourceText: string }
   | { kind: 'success'; result: TranslateResponse }
   | { kind: 'error'; message: string; sourceText: string }
-  | { kind: 'empty' };
+  | { kind: 'translator' };
 
 const translateFacade = createProductTranslationFacade();
 
 export default function Popup() {
-  const [state, setState] = useState<PopupState>({ kind: 'loading', sourceText: '' });
+  const [state, setState] = useState<PopupState>({ kind: 'translator' });
   const [ankiState, setAnkiState] = useState<AnkiAddState>('idle');
   const [ankiViewState, setAnkiViewState] = useState<AnkiViewState>('idle');
   const [ankiError, setAnkiError] = useState<string | null>(null);
@@ -57,15 +58,22 @@ export default function Popup() {
     string | null
   >(null);
   const pronunciationPlaybackAbortRef = useRef<AbortController | null>(null);
+  const selectionAbortRef = useRef<AbortController | null>(null);
+  const [manualSourceText, setManualSourceText] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
+    selectionAbortRef.current = controller;
+    // Badge cleanup must not delay the popup's usable content.
+    void chrome.action.setBadgeText({ text: '' }).catch(() => undefined);
 
     void (async () => {
-      const pending = await getPopupSelection();
-      await chrome.action.setBadgeText({ text: '' });
-      if (!pending) {
-        setState({ kind: 'empty' });
+      const pending = await getPopupSelection().catch(() => null);
+      if (controller.signal.aborted) return;
+      if (!pending) return;
+
+      if (pending.trigger !== 'selection-action') {
+        setManualSourceText(pending.text);
         return;
       }
 
@@ -76,6 +84,7 @@ export default function Popup() {
           getTranslationProvider(),
         ]);
         setActiveTranslationProvider(activeProvider);
+        if (controller.signal.aborted) return;
         const result = await translateFacade.translate(
           {
             text: pending.text,
@@ -84,6 +93,7 @@ export default function Popup() {
           },
           controller.signal,
         );
+        if (controller.signal.aborted) return;
         setState({ kind: 'success', result });
         setPronunciationState('ready');
         setTranslatedPronunciationState('ready');
@@ -310,15 +320,33 @@ export default function Popup() {
 
   return (
     <main className="bg-[#2a2a2c] text-zinc-100">
-      {state.kind === 'empty' && (
-        <section className="p-4">
-          <p className="text-sm font-medium text-zinc-100">Translate text from any page</p>
-          <p className="mt-2 text-xs leading-relaxed text-zinc-400">
-            Select text, then click the extension icon again. You can also right-click the text
-            and choose <strong>Translate selection</strong>. Use the right-click action if your
-            browser PDF viewer blocks direct selection access.
-          </p>
-        </section>
+      {state.kind === 'translator' && (
+        <PopupTranslator
+          initialText={manualSourceText}
+          onInteract={() => selectionAbortRef.current?.abort()}
+        />
+      )}
+      {state.kind !== 'translator' && (
+        <div className="border-b border-white/[0.08] px-4 py-2">
+          <button
+            type="button"
+            className="translator-secondary px-2 py-1 text-xs"
+            onClick={() => {
+              setManualSourceText(state.kind === 'success' ? state.result.source_text : state.sourceText);
+              selectionAbortRef.current?.abort();
+              pronunciationPlaybackAbortRef.current?.abort();
+              pronunciationPlaybackAbortRef.current = null;
+              if (pronunciationRequestIdRef.current) {
+                for (const suffix of ['anki', 'original', 'translated']) {
+                  void requestPronunciationCancel(`${pronunciationRequestIdRef.current}:${suffix}`, { discardSession: true });
+                }
+              }
+              stopBrowserSpeech(window);
+              void requestPronunciationStop();
+              setState({ kind: 'translator' });
+            }}
+          >Open translator</button>
+        </div>
       )}
 
       {state.kind === 'loading' && (

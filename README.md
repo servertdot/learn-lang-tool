@@ -7,6 +7,7 @@ The goal is to help you learn expressions in the context where you found them—
 ## Features
 
 - Translate selected text directly on the page.
+- Open the toolbar translator to type or paste text, choose source and target languages, and copy the result.
 - Translate the word under the cursor with a hold-to-translate hotkey.
 - Use Google Translate by default for translation quality.
 - Switch to local Bergamot translation for a private, offline `en → ru` workflow.
@@ -35,6 +36,12 @@ The goal is to help you learn expressions in the context where you found them—
 ```
 
 Google Translate receives the selected text when it is the active provider. With Bergamot, the model pack is downloaded with explicit consent and translation then works offline without sending selections to a translation service.
+
+### Toolbar translator
+
+Click the pinned extension icon to open a translator with Source and Target fields. Any selected page text is filled into Source and translated automatically into Target; otherwise the field starts empty. Edit, type, or paste up to 2,000 characters, choose the languages, and click **Translate** or press **Ctrl/⌘ + Enter** to translate again. Use the swap button to reverse the direction and **Copy** to copy the result. The context-menu **Translate selection** action still translates immediately; **Open translator** switches from that result to the translator with the original text filled in and translated automatically.
+
+The translator starts with your configured language pair and uses your selected provider. Language changes in this window apply only to that session. Bergamot requires an installed model pack for the chosen pair.
 
 ### Special text sources
 

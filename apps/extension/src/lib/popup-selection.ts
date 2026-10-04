@@ -22,6 +22,10 @@ interface PopupSelectionDependencies {
   readActiveTabSelection(): Promise<PendingSelection | null>;
 }
 
+export interface PopupSelection extends PendingSelection {
+  trigger: 'toolbar' | 'selection-action';
+}
+
 function asPendingSelection(response: unknown, fallbackPageUrl?: string): PendingSelection | null {
   if (!response || typeof response !== 'object') return null;
 
@@ -90,7 +94,10 @@ export async function getPopupSelection(
     takePendingSelection,
     readActiveTabSelection,
   },
-): Promise<PendingSelection | null> {
+): Promise<PopupSelection | null> {
   const pendingSelection = await dependencies.takePendingSelection();
-  return pendingSelection ?? dependencies.readActiveTabSelection();
+  if (pendingSelection) return { ...pendingSelection, trigger: 'selection-action' };
+
+  const selection = await dependencies.readActiveTabSelection();
+  return selection ? { ...selection, trigger: 'toolbar' } : null;
 }

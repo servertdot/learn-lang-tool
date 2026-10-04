@@ -12,3 +12,75 @@ body {
 
   overflow: auto;
 }
+
+.translator-language,
+.translator-text {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 10px;
+  background: #222224;
+  color: #f4f4f5;
+  font: inherit;
+  font-size: 12px;
+}
+
+.translator-language {
+  height: 36px;
+  padding: 0 6px;
+}
+
+.translator-text {
+  display: block;
+  min-height: 102px;
+  max-height: 180px;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.translator-text::placeholder {
+  color: #71717a;
+}
+
+.translator-secondary,
+.translator-submit {
+  border-radius: 8px;
+}
+
+.translator-secondary {
+  color: #a1a1aa;
+}
+
+.translator-secondary:hover:enabled {
+  background: rgb(255 255 255 / 6%);
+  color: #f4f4f5;
+}
+
+.translator-submit {
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.translator-submit:hover:enabled {
+  background: white;
+}
+
+.translator-secondary:active:enabled,
+.translator-submit:active:enabled {
+  transform: scale(0.97);
+}
+
+.translator-secondary:disabled,
+.translator-submit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.translator-language:focus-visible,
+.translator-text:focus-visible,
+.translator-secondary:focus-visible,
+.translator-submit:focus-visible {
+  outline: 2px solid #a1a1aa;
+  outline-offset: 2px;
+}
