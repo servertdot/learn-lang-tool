@@ -2,6 +2,19 @@
 
 All notable changes to Learn Lang Tool are documented in this file.
 
+## 1.0.7 - 2026-10-04
+
+### Improvements
+
+- Always open the toolbar popup as a translator with editable Source and read-only Target fields.
+- Fill Source from the selected page text and translate it automatically without leaving the form.
+- Choose source and target languages, swap direction, clear input, copy translations, and translate with Ctrl/⌘ + Enter.
+
+### Fixes
+
+- Show the translator immediately while checking the page selection, without a premature translating status.
+- Cancel outdated translations and preserve manual input when page selection arrives late.
+
 ## 1.0.6 - 2026-08-16
 
 ### Fixes
