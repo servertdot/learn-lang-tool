@@ -9,9 +9,11 @@ import { setTranslationProvider } from '@src/lib/storage';
 
 const storage = vi.hoisted(() => ({
   data: {} as Record<string, unknown>,
+  local: {} as Record<string, unknown>,
   listeners: new Set<(changes: Record<string, { newValue?: unknown }>, area: string) => void>(),
   get: vi.fn(),
   set: vi.fn(),
+  setLocal: vi.fn(),
   translate: vi.fn(),
 }));
 
@@ -20,6 +22,7 @@ vi.mock('webextension-polyfill', () => ({
     runtime: { sendMessage: async () => ({ type: 'llt.modelPack.status', status: 'missing' }) },
     storage: {
       sync: { get: storage.get, set: storage.set },
+      local: { get: async () => ({ ...storage.local }), set: storage.setLocal },
       onChanged: {
         addListener: (listener: (changes: Record<string, { newValue?: unknown }>, area: string) => void) => storage.listeners.add(listener),
         removeListener: (listener: (changes: Record<string, { newValue?: unknown }>, area: string) => void) => storage.listeners.delete(listener),
@@ -41,11 +44,15 @@ function emit(pair: LanguagePair | undefined, area = 'sync') {
 beforeEach(() => {
   vi.resetAllMocks();
   storage.data = {};
+  storage.local = {};
   storage.listeners.clear();
   storage.get.mockImplementation(async (key: string) => ({ [key]: storage.data[key] }));
   storage.set.mockImplementation(async (values: Record<string, unknown>) => {
     Object.assign(storage.data, values);
     if ('languagePair' in values) emit(values.languagePair as LanguagePair);
+  });
+  storage.setLocal.mockImplementation(async (values: Record<string, unknown>) => {
+    Object.assign(storage.local, values);
   });
   storage.translate.mockResolvedValue({ translated_text: 'привет' });
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -103,6 +110,116 @@ async function select(name: string, field: number, code: string) {
 async function swap(name: string) {
   await act(async () => windowElement(name).querySelector<HTMLButtonElement>('[aria-label="Swap languages"]')!.click());
 }
+
+async function chooseProvider(value: string) {
+  await act(async () => {
+    const provider = windowElement('options').querySelector<HTMLSelectElement>('#translation-provider')!;
+    provider.value = value;
+    provider.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
+async function fillInput(id: string, value: string) {
+  await act(async () => {
+    const field = windowElement('options').querySelector<HTMLInputElement>(`#${id}`)!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+async function submitSettings() {
+  await act(async () => windowElement('options').querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+}
+
+describe('translation providers', () => {
+  it('uses MyMemory anonymously and can save and clear a reachable Gmail alias', async () => {
+    storage.data.languagePair = { from_code: 'auto', to_code: 'ru' };
+    await open();
+    await chooseProvider('mymemory');
+    expect([...selects('options')[0].options].some(option => option.value === 'auto')).toBe(false);
+    expect(pair('options')).toEqual(['en', 'ru']);
+    await submitSettings();
+    expect(storage.data.translationProvider).toBe('mymemory');
+    expect(storage.local).toEqual({});
+
+    await fillInput('mymemory-email', 'person+old@gmail.com');
+    await act(async () => windowElement('options').querySelector<HTMLButtonElement>('.provider-alias')!.click());
+    const email = () => windowElement('options').querySelector<HTMLInputElement>('#mymemory-email')!;
+    expect(email().value).toBe('person+learnlangtool@gmail.com');
+    expect(windowElement('options').querySelector('.provider-alias')).toBeNull();
+    await submitSettings();
+    expect(storage.local.myMemoryEmail).toBe('person+learnlangtool@gmail.com');
+    expect(storage.data).not.toHaveProperty('myMemoryEmail');
+    await act(async () => root.render(null));
+    await open();
+    expect(email().value).toBe('person+learnlangtool@gmail.com');
+    await fillInput('mymemory-email', '');
+    await submitSettings();
+    expect(storage.local.myMemoryEmail).toBe('');
+  });
+
+  it('validates MyMemory contact addresses and accepts email from other domains', async () => {
+    await open();
+    await chooseProvider('mymemory');
+    await fillInput('mymemory-email', 'invalid');
+    await submitSettings();
+    expect(storage.setLocal).not.toHaveBeenCalled();
+    expect(storage.data.translationProvider).toBeUndefined();
+    await fillInput('mymemory-email', 'learner@example.org');
+    expect(windowElement('options').querySelector('.provider-alias')).toBeNull();
+    await submitSettings();
+    expect(storage.local.myMemoryEmail).toBe('learner@example.org');
+    expect(storage.data.translationProvider).toBe('mymemory');
+  });
+
+  it('requires an Azure key, masks it and retains credentials across provider switches', async () => {
+    await open();
+    await chooseProvider('microsoft');
+    expect(windowElement('options').querySelector<HTMLInputElement>('#microsoft-key')!.type).toBe('password');
+    await submitSettings();
+    expect(storage.data.translationProvider).toBeUndefined();
+    await fillInput('microsoft-key', 'example-key');
+    await fillInput('microsoft-region', 'westeurope');
+    await submitSettings();
+    expect(storage.local).toEqual({ microsoftKey: 'example-key', microsoftRegion: 'westeurope' });
+    expect(storage.data.translationProvider).toBe('microsoft');
+    expect(JSON.stringify(storage.data)).not.toContain('example-key');
+    await chooseProvider('deepl');
+    expect(windowElement('options').textContent).toContain('http://localhost:3000');
+    expect(windowElement('options').querySelector('#microsoft-key')).toBeNull();
+    await submitSettings();
+    expect(storage.data.translationProvider).toBe('deepl');
+    await chooseProvider('microsoft');
+    expect(windowElement('options').querySelector<HTMLInputElement>('#microsoft-key')!.value).toBe('example-key');
+  });
+
+  it('keeps the active provider when its new credentials cannot be saved', async () => {
+    await open();
+    await chooseProvider('microsoft');
+    await fillInput('microsoft-key', 'example-key');
+    storage.setLocal.mockRejectedValueOnce(new Error('Credentials could not be saved'));
+    await submitSettings();
+    expect(storage.data.translationProvider).toBeUndefined();
+    expect(windowElement('options').querySelector('[role="alert"]')?.textContent).toContain('Could not save');
+    await submitSettings();
+    expect(storage.data.translationProvider).toBe('microsoft');
+  });
+
+  it('discards unsaved contact details when switching providers', async () => {
+    storage.local.myMemoryEmail = 'existing@example.org';
+    await open();
+    await chooseProvider('mymemory');
+    await fillInput('mymemory-email', 'invalid');
+    await chooseProvider('google');
+    await submitSettings();
+    expect(storage.data.translationProvider).toBe('google');
+    expect(storage.setLocal).not.toHaveBeenCalled();
+    await chooseProvider('mymemory');
+    expect(windowElement('options').querySelector<HTMLInputElement>('#mymemory-email')!.value)
+      .toBe('existing@example.org');
+  });
+});
 
 describe('shared language pair settings', () => {
   it('selects English in both windows when switching from Auto-Detect to Bergamot', async () => {

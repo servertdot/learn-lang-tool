@@ -33,6 +33,8 @@
     "http://localhost/*",
     "https://storage.googleapis.com/*",
     "https://translate.google.com/*",
+    "https://api.mymemory.translated.net/*",
+    "https://api.cognitive.microsofttranslator.com/*",
     "https://huggingface.co/*",
     "https://*.huggingface.co/*"
   ],

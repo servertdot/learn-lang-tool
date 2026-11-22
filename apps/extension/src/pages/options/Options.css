@@ -310,6 +310,21 @@ select:disabled {
   margin-top: 26px;
 }
 
+fieldset.settings-form {
+  min-width: 0;
+  margin-inline: 0;
+  padding: 0;
+  border: 0;
+}
+
+.provider-alias {
+  margin-top: 10px;
+}
+
+.field-note a {
+  color: var(--accent);
+}
+
 .form-field-wide {
   grid-column: 1 / -1;
 }

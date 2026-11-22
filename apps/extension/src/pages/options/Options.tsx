@@ -25,6 +25,11 @@ import {
 import type { AnkiQueueInfo } from '@src/lib/anki-queue';
 import type { AnkiDuplicateConflict } from '@src/lib/anki-queue-sync';
 import { translationProviderPrivacyCopy } from '@src/lib/translation-provider-privacy';
+import {
+  readTranslationProviderSettings,
+  saveTranslationProviderSettings,
+  type TranslationProviderSettings,
+} from '@src/lib/translation-provider-settings';
 import type { AnkiDuplicateDecision } from '@src/lib/extension-messages';
 import { AnkiDuplicateDialog } from '@src/components/AnkiDuplicateDialog';
 import { HotkeyCapture } from '@src/components/HotkeyCapture';
@@ -34,6 +39,7 @@ import type { TranslationProvider } from '@package/shared';
 import {
   DEFAULT_HOTKEY,
   DEFAULT_TRANSLATION_PROVIDER,
+  supportsAutoSource,
 } from '@package/shared';
 import {
   formatApproxSize,
@@ -46,6 +52,7 @@ import {
 } from '@src/lib/messaging-translation-engine';
 import type { ModelPackStatus } from '@src/lib/model-pack-store';
 import type { LltMessage } from '@src/lib/extension-messages';
+import { ProviderSettingsFields } from './ProviderSettingsFields';
 import './Options.css';
 
 const ANKI_FIELD_VALUE_OPTIONS: { value: AnkiFieldValue; label: string }[] = [
@@ -59,6 +66,10 @@ export default function Options() {
   const { pair, ready: languagesReady, saving: languagesSaving, error: languageError, changePair } = useLanguagePair();
   const [hotkey, setHotkeyState] = useState(DEFAULT_HOTKEY);
   const [provider, setProvider] = useState<TranslationProvider>(DEFAULT_TRANSLATION_PROVIDER);
+  const [providerSettings, setProviderSettings] = useState<TranslationProviderSettings | null>(null);
+  const [providerEdits, setProviderEdits] = useState<Partial<TranslationProviderSettings>>({});
+  const [translationError, setTranslationError] = useState<string>();
+  const [translationSaving, setTranslationSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [packStatus, setPackStatus] = useState<ModelPackStatus>('missing');
   const [packError, setPackError] = useState<string | undefined>();
@@ -90,10 +101,17 @@ export default function Options() {
   }
 
   useEffect(() => {
-    Promise.all([getHotkey(), getTranslationProvider()]).then(([k, value]) => {
-      setHotkeyState(k);
-      setProvider(value);
-    });
+    let active = true;
+    Promise.all([getHotkey(), getTranslationProvider(), readTranslationProviderSettings()])
+      .then(([k, value, settings]) => {
+        if (!active) return;
+        setHotkeyState(k);
+        setProvider(value);
+        setProviderSettings(settings);
+      }).catch(() => {
+        if (active) setTranslationError('Could not load translation settings. Reopen this page to try again.');
+      });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -137,14 +155,26 @@ export default function Options() {
     return () => chrome.runtime.onMessage.removeListener(onMessage);
   }, [pack?.id]);
 
-  async function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    await Promise.all([
-      setHotkey(hotkey),
-      setTranslationProvider(provider),
-    ]);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    if (!providerSettings || translationSaving || !e.currentTarget.reportValidity()) return;
+    setTranslationSaving(true);
+    setTranslationError(undefined);
+    try {
+      if (Object.keys(providerEdits).length > 0) {
+        await saveTranslationProviderSettings(providerEdits);
+        setProviderSettings({ ...providerSettings, ...providerEdits });
+        setProviderEdits({});
+      }
+      await setHotkey(hotkey);
+      await setTranslationProvider(provider);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      setTranslationError('Could not save translation settings. Please try again.');
+    } finally {
+      setTranslationSaving(false);
+    }
   }
 
   async function handleInstall() {
@@ -394,7 +424,7 @@ export default function Options() {
         <header className="content-intro">
           <p className="eyebrow">Personal workspace</p>
           <h2>Settings that feel like yours</h2>
-          <p>Changes stay with your browser profile and follow you through extension sync.</p>
+          <p>Your provider, languages, and hotkey follow you when browser sync is enabled.</p>
         </header>
 
         <section id="translation" className="settings-card">
@@ -406,64 +436,81 @@ export default function Options() {
             </div>
           </div>
 
-          <form onSubmit={handleSave} className="settings-form">
-            <div className="form-field form-field-wide">
-              <label htmlFor="translation-provider">Translation provider</label>
-              <select
-                id="translation-provider"
-                value={provider}
-                onChange={e => {
-                  const next = e.target.value as TranslationProvider;
-                  setProvider(next);
-                  if (next === 'bergamot' && pair.from_code === 'auto') {
-                    void changePair({ ...pair, from_code: 'en' });
-                  }
-                }}
-              >
-                <option value="google">Google Translate — better quality</option>
-                <option value="bergamot">Bergamot — private and offline</option>
-              </select>
-              <p className="field-note">
-                {translationProviderPrivacyCopy(provider)}
-              </p>
-            </div>
+          <form onSubmit={handleSave} onChange={() => setSaved(false)}>
+            <fieldset className="settings-form" disabled={!providerSettings || translationSaving}>
+              <div className="form-field form-field-wide">
+                <label htmlFor="translation-provider">Translation provider</label>
+                <select
+                  id="translation-provider"
+                  aria-describedby="translation-provider-privacy"
+                  value={provider}
+                  onChange={e => {
+                    const next = e.target.value as TranslationProvider;
+                    setProvider(next);
+                    setProviderEdits({});
+                    if (!supportsAutoSource(next) && pair.from_code === 'auto') {
+                      void changePair({ ...pair, from_code: 'en' });
+                    }
+                  }}
+                >
+                  <option value="google">Google Translate</option>
+                  <option value="mymemory">MyMemory</option>
+                  <option value="microsoft">Microsoft Translator (Azure)</option>
+                  <option value="deepl">DeepL (local proxy)</option>
+                  <option value="bergamot">Bergamot — private and offline</option>
+                </select>
+                <p className="field-note" id="translation-provider-privacy">
+                  {translationProviderPrivacyCopy(provider)}
+                </p>
+              </div>
 
-            <div className="form-field-wide">
-              <LanguagePairSelect
-                pair={pair}
-                disabled={!languagesReady || languagesSaving}
-                fieldClassName="form-field"
-                swapClassName="button button-secondary language-swap"
-                onChange={next => {
-                  void changePair(provider === 'bergamot' && next.from_code === 'auto'
-                    ? { ...next, from_code: 'en' }
-                    : next);
-                }}
-                onSwap={() => { void changePair({ from_code: pair.to_code, to_code: pair.from_code }); }}
-              />
-              <p className="field-note">Languages save automatically and apply to the toolbar translator too.</p>
-              {languageError && <p role="alert" className="field-note">{languageError}</p>}
-            </div>
+              {providerSettings && (
+                <ProviderSettingsFields provider={provider} settings={{ ...providerSettings, ...providerEdits }}
+                  onChange={patch => {
+                    setSaved(false);
+                    setProviderEdits(current => ({ ...current, ...patch }));
+                  }} />
+              )}
 
-            <div className="form-field form-field-wide">
-              <label htmlFor="translation-hotkey">Hold-to-translate key</label>
-              <HotkeyCapture
-                id="translation-hotkey"
-                value={hotkey}
-                onChange={setHotkeyState}
-              />
-              <p className="field-note">
-                Click the field, then press a key or combination. Hold it while selecting or
-                pointing at a word.
-              </p>
-            </div>
+              <div className="form-field-wide">
+                <LanguagePairSelect
+                  pair={pair}
+                  allowAutoSource={supportsAutoSource(provider)}
+                  disabled={!languagesReady || languagesSaving}
+                  fieldClassName="form-field"
+                  swapClassName="button button-secondary language-swap"
+                  onChange={next => {
+                    void changePair(!supportsAutoSource(provider) && next.from_code === 'auto'
+                      ? { ...next, from_code: 'en' }
+                      : next);
+                  }}
+                  onSwap={() => { void changePair({ from_code: pair.to_code, to_code: pair.from_code }); }}
+                />
+                <p className="field-note">Languages save automatically and apply to the toolbar translator too.</p>
+                {languageError && <p role="alert" className="field-note">{languageError}</p>}
+              </div>
 
-            <div className="form-action form-field-wide">
-              <button type="submit" className="button button-primary">
-                {saved ? 'Saved ✓' : 'Save translation settings'}
-              </button>
-              <span aria-live="polite">{saved ? 'Your preferences are up to date.' : 'Stored securely in extension sync.'}</span>
-            </div>
+              <div className="form-field form-field-wide">
+                <label htmlFor="translation-hotkey">Hold-to-translate key</label>
+                <HotkeyCapture
+                  id="translation-hotkey"
+                  value={hotkey}
+                  onChange={setHotkeyState}
+                />
+                <p className="field-note">
+                  Click the field, then press a key or combination. Hold it while selecting or
+                  pointing at a word.
+                </p>
+              </div>
+
+              <div className="form-action form-field-wide">
+                <button type="submit" className="button button-primary">
+                  {translationSaving ? 'Saving…' : saved ? 'Saved ✓' : 'Save translation settings'}
+                </button>
+                <span aria-live="polite">{saved && 'Your preferences are up to date.'}</span>
+              </div>
+            </fieldset>
+            {translationError && <p role="alert" className="error-message">{translationError}</p>}
           </form>
 
           {provider === 'bergamot' && (

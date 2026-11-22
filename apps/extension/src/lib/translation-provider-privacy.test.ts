@@ -16,4 +16,14 @@ describe('translationProviderPrivacyCopy', () => {
       'Bergamot mode never invokes Google TTS',
     );
   });
+
+  it.each([
+    ['mymemory', 'MyMemory'],
+    ['microsoft', 'Microsoft Translator'],
+    ['deepl', 'DeepL'],
+  ] as const)('identifies the service that receives the selected text for %s', (provider, service) => {
+    const copy = translationProviderPrivacyCopy(provider);
+    expect(copy).toContain('selected text');
+    expect(copy).toContain(service);
+  });
 });

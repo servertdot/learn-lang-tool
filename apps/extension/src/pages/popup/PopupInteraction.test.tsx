@@ -6,6 +6,7 @@ import Popup from './Popup';
 
 const mocks = vi.hoisted(() => ({
   selection: vi.fn(),
+  provider: vi.fn(async () => 'google'),
   pair: vi.fn(),
   setPair: vi.fn(async (pair: { from_code: string; to_code: string }) => pair),
   translate: vi.fn(),
@@ -16,8 +17,9 @@ vi.mock('@src/lib/popup-selection', () => ({ getPopupSelection: mocks.selection 
 vi.mock('@src/lib/storage', () => ({
   getLanguagePair: mocks.pair,
   setLanguagePair: mocks.setPair,
+  subscribeTranslationProvider: vi.fn(() => () => undefined),
   subscribeLanguagePair: vi.fn(() => () => undefined),
-  getTranslationProvider: vi.fn(async () => 'google'),
+  getTranslationProvider: mocks.provider,
 }));
 vi.mock('@src/lib/product-translator', () => ({
   createProductTranslationFacade: () => ({ translate: mocks.translate }),
@@ -46,6 +48,7 @@ beforeEach(() => {
     action: { setBadgeText: vi.fn(async () => undefined) },
     runtime: { openOptionsPage: vi.fn(async () => undefined) },
   });
+  mocks.provider.mockResolvedValue('google');
   mocks.selection.mockResolvedValue(null);
   mocks.pair.mockResolvedValue({ from_code: 'en', to_code: 'ru' });
   mocks.translate.mockResolvedValue(result);
@@ -95,6 +98,20 @@ async function submit() {
 }
 
 describe('toolbar popup modes', () => {
+  it('uses the MyMemory byte limit and requires an explicit source', async () => {
+    mocks.provider.mockResolvedValue('mymemory');
+    await open();
+    await type('я'.repeat(251));
+    expect(container.textContent).toContain('502 / 500 bytes');
+    expect(button('Translate').disabled).toBe(true);
+    expect(container.querySelector('option[value="auto"]')).toBeNull();
+    await submit();
+    expect(mocks.translate).not.toHaveBeenCalled();
+
+    await type('я'.repeat(250));
+    expect(button('Translate').disabled).toBe(false);
+  });
+
   it('shows the manual translator immediately while checking for a selection', async () => {
     let finish!: (value: null) => void;
     mocks.selection.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));

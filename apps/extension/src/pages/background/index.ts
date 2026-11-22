@@ -40,7 +40,7 @@ import {
 import { getAnkiAudioFieldNames, createAnkiNote } from '@src/lib/anki';
 import { lltError, lltLog } from '@src/lib/debug-log';
 import { getAnkiSettings, getTranslationProvider } from '@src/lib/storage';
-import { createGoogleTranslationEngine } from '@src/lib/google-translation-engine';
+import { getRemoteTranslationEngine } from '@src/lib/remote-translation-engine';
 import { createTranslationFacade, TranslationFacadeError } from '@src/lib/translation-facade';
 import { MAX_TRANSLATION_TEXT_LENGTH } from '@package/shared';
 import {
@@ -78,9 +78,6 @@ const OFFSCREEN_JUSTIFICATION =
 const modelPackStore = createModelPackStore(createChromeModelPackPersistence());
 const speechModelPackStore = createModelPackStore(createChromeSpeechModelPackPersistence());
 const pronunciationArtifactStore = createIndexedDbPronunciationArtifactStore();
-const googleTranslationFacade = createTranslationFacade(createGoogleTranslationEngine(), {
-  maxLength: MAX_TRANSLATION_TEXT_LENGTH,
-});
 const remoteTranslateAborts = new Map<string, AbortController>();
 const ANKI_QUEUE_SYNC_ALARM = 'llt.anki.syncQueue';
 const ankiQueue = new AnkiQueue(createChromeAnkiQueueStorage());
@@ -761,9 +758,11 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
           return;
         }
 
-        if (provider === 'google') {
+        if (provider !== 'bergamot') {
           try {
-            const result = await googleTranslationFacade.translate(
+            const engine = await getRemoteTranslationEngine(provider);
+            const facade = createTranslationFacade(engine, { maxLength: MAX_TRANSLATION_TEXT_LENGTH });
+            const result = await facade.translate(
               message.request,
               remoteController.signal,
             );
@@ -785,7 +784,7 @@ chrome.runtime.onMessage.addListener((message: LltMessage, sender, sendResponse)
                   ? err
                   : new TranslationFacadeError(
                       'engine_failure',
-                      err instanceof Error ? err.message : 'Google translation failed',
+                      err instanceof Error ? err.message : 'Translation failed',
                     );
               sendResponse({
                 type: 'llt.translate.error',

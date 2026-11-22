@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { MAX_TRANSLATION_TEXT_LENGTH } from '@package/shared';
-import type { LanguagePair } from '@package/shared';
+import {
+  MAX_TRANSLATION_TEXT_LENGTH, MYMEMORY_MAX_TEXT_BYTES, supportsAutoSource,
+  type LanguagePair, type TranslationProvider,
+} from '@package/shared';
 import { SettingsAction } from '@src/components/SettingsAction';
 import { createProductTranslationFacade } from '@src/lib/product-translator';
+import { getTranslationProvider, subscribeTranslationProvider } from '@src/lib/storage';
 import { useLanguagePair } from '@src/lib/use-language-pair';
 import { LanguagePairSelect } from '@src/components/LanguagePairSelect';
 
@@ -11,6 +14,10 @@ const translator = createProductTranslationFacade();
 interface PopupTranslatorProps {
   initialText?: string;
   onInteract?: () => void;
+}
+
+function textLength(text: string, provider: TranslationProvider | null) {
+  return provider === 'mymemory' ? new TextEncoder().encode(text).byteLength : text.length;
 }
 
 export function PopupTranslator({ initialText = '', onInteract }: PopupTranslatorProps) {
@@ -25,8 +32,28 @@ export function PopupTranslator({ initialText = '', onInteract }: PopupTranslato
   const copyVersionRef = useRef(0);
   const interactedRef = useRef(false);
   const autoTranslatedRef = useRef(false);
-  const tooLong = source.length > MAX_TRANSLATION_TEXT_LENGTH;
-  const canTranslate = ready && !!source.trim() && !tooLong && !loading && !saving;
+  const [provider, setProvider] = useState<TranslationProvider | null>(null);
+  const byteLimit = provider === 'mymemory';
+  const length = textLength(source, provider);
+  const limit = byteLimit ? MYMEMORY_MAX_TEXT_BYTES : MAX_TRANSLATION_TEXT_LENGTH;
+  const tooLong = length > limit;
+  useEffect(() => {
+    let pending = true;
+    const unsubscribe = subscribeTranslationProvider(next => {
+      pending = false;
+      setProvider(next);
+    });
+    void getTranslationProvider().then(value => {
+      if (pending) setProvider(value);
+    }).catch(() => {
+      if (pending) setError('Could not load the translation provider. Reopen the popup to try again.');
+    });
+    return () => {
+      pending = false;
+      unsubscribe();
+    };
+  }, []);
+  const canTranslate = ready && provider !== null && !!source.trim() && !tooLong && !loading && !saving;
 
   // The page selection arrives asynchronously; manual interaction cancels its import.
   useEffect(() => {
@@ -59,9 +86,10 @@ export function PopupTranslator({ initialText = '', onInteract }: PopupTranslato
 
   useEffect(() => {
     resetTranslation();
-  }, [pair.from_code, pair.to_code, resetTranslation]);
+  }, [pair.from_code, pair.to_code, provider, resetTranslation]);
 
   const runTranslation = useCallback(async (text: string, languagePair: LanguagePair) => {
+    if (!provider) return;
     resetTranslation();
     const controller = new AbortController();
     requestRef.current = controller;
@@ -76,14 +104,14 @@ export function PopupTranslator({ initialText = '', onInteract }: PopupTranslato
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [resetTranslation]);
+  }, [provider, resetTranslation]);
 
   useEffect(() => {
-    if (!ready || interactedRef.current || autoTranslatedRef.current) return;
-    if (!initialText.trim() || initialText.length > MAX_TRANSLATION_TEXT_LENGTH) return;
+    if (!ready || !provider || interactedRef.current || autoTranslatedRef.current) return;
+    if (!initialText.trim() || textLength(initialText, provider) > limit) return;
     autoTranslatedRef.current = true;
     void runTranslation(initialText, pair);
-  }, [ready, initialText, pair, runTranslation]);
+  }, [ready, provider, limit, initialText, pair, runTranslation]);
 
   const translate = async () => {
     if (!canTranslate) return;
@@ -114,6 +142,7 @@ export function PopupTranslator({ initialText = '', onInteract }: PopupTranslato
       <form onChange={handleInteraction} onSubmit={event => { event.preventDefault(); void translate(); }}>
         <LanguagePairSelect
           pair={pair}
+          allowAutoSource={provider !== null && supportsAutoSource(provider)}
           disabled={!ready || saving}
           className="mb-3"
           fieldClassName="text-xs text-zinc-400"
@@ -163,7 +192,7 @@ export function PopupTranslator({ initialText = '', onInteract }: PopupTranslato
         />
         <div className="my-2 flex items-center justify-between gap-2">
           <span id="translator-length" className={`text-[11px] tabular-nums ${tooLong ? 'text-rose-300' : 'text-zinc-500'}`}>
-            {source.length} / {MAX_TRANSLATION_TEXT_LENGTH}
+            {length} / {limit}{byteLimit ? ' bytes' : ''}
           </span>
           <button type="submit" className="translator-submit px-4 py-2 text-xs font-semibold" disabled={!canTranslate}>
             {loading ? 'Translating…' : 'Translate'}
@@ -188,7 +217,7 @@ export function PopupTranslator({ initialText = '', onInteract }: PopupTranslato
         placeholder={loading ? 'Translating…' : 'Translation appears here'}
       />
       <p role="status" className="sr-only">{loading ? 'Translating…' : target ? 'Translation ready' : ''}{copied ? '. Copied' : ''}</p>
-      {tooLong && <p role="alert" className="mt-2 text-xs text-rose-300">Shorten the text to {MAX_TRANSLATION_TEXT_LENGTH} characters to translate.</p>}
+      {tooLong && <p role="alert" className="mt-2 text-xs text-rose-300">Shorten the text to {limit} {byteLimit ? 'UTF-8 bytes' : 'characters'} to translate.</p>}
       {(languageError || error) && <p role="alert" className="mt-2 text-xs leading-relaxed text-rose-300">{languageError || error}</p>}
     </section>
   );

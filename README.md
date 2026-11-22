@@ -9,7 +9,7 @@ The goal is to help you learn expressions in the context where you found them—
 - Translate selected text directly on the page.
 - Open the toolbar translator to type or paste text, choose source and target languages, and copy the result.
 - Translate the word under the cursor with a hold-to-translate hotkey.
-- Use Google Translate by default for translation quality.
+- Choose Google Translate (default), MyMemory, Microsoft Translator, or DeepL for online translation.
 - Switch to local Bergamot translation for a private, offline `en → ru` workflow.
 - Save the original text, translation, and context sentence to a local Anki queue.
 - Synchronize queued cards through AnkiConnect or export them as TSV/CSV.
@@ -43,19 +43,19 @@ Translate a selection while reading. The popover shows the translation and origi
 
 ```text
 ┌─────────────────┐     ┌──────────────────┐     ┌────────────────────┐
-│  Extension UI   │────▶│  Background      │────▶│  Google Translate  │
+│  Extension UI   │────▶│  Background      │────▶│  Online provider   │
 │  (popover)      │     │  provider router │     └────────────────────┘
 │                 │◀────│                  │────▶ Offscreen / Bergamot
 └─────────────────┘     └──────────────────┘
 ```
 
-Google Translate receives the selected text when it is the active provider. With Bergamot, the model pack is downloaded with explicit consent and translation then works offline without sending selections to a translation service.
+The selected online provider receives the text you translate. With Bergamot, the model pack is downloaded with explicit consent and translation then works offline without sending selections to a translation service.
 
 ### Toolbar translator
 
-Click the pinned extension icon to open a translator with Source and Target fields. Any selected page text is filled into Source and translated automatically into Target; otherwise the field starts empty. Edit, type, or paste up to 2,000 characters, choose the languages, and click **Translate** or press **Ctrl/⌘ + Enter** to translate again. Use the swap button to reverse the direction and **Copy** to copy the result. The context-menu **Translate selection** action still translates immediately; **Open translator** switches from that result to the translator with the original text filled in and translated automatically.
+Click the pinned extension icon to open a translator with Source and Target fields. Any selected page text is filled into Source and translated automatically into Target; otherwise the field starts empty. Edit, type, or paste up to 2,000 characters (500 UTF-8 bytes with MyMemory), choose the languages, and click **Translate** or press **Ctrl/⌘ + Enter** to translate again. Use the swap button to reverse the direction and **Copy** to copy the result. The context-menu **Translate selection** action still translates immediately; **Open translator** switches from that result to the translator with the original text filled in and translated automatically.
 
-The translator starts with your configured language pair and uses your selected provider. Language changes save automatically and are shared with Options and page translations. Choose **Auto-Detect** as the source language with Google Translate to detect the language in the same translation request, with no extra request or fee through the current web endpoint. The detected language is used for pronunciation and Anki; your source setting stays Auto-Detect. Choose a specific source language to enable swapping. Switching to Bergamot changes an Auto-Detect source to English. Bergamot requires an installed model pack for the chosen pair. Detection can be ambiguous for short words, so you can always choose the source language manually.
+The translator starts with your configured language pair and uses your selected provider. Language changes save automatically and are shared with Options and page translations. Choose **Auto-Detect** as the source language with Google Translate, Microsoft Translator, or DeepL to detect the language in the same translation request. The detected language is used for pronunciation and Anki; your source setting stays Auto-Detect. Choose a specific source language to enable swapping. Switching to MyMemory or Bergamot changes an Auto-Detect source to English. Bergamot requires an installed model pack for the chosen pair. Detection can be ambiguous for short words, so you can always choose the source language manually.
 
 ### Special text sources
 
@@ -71,7 +71,7 @@ The main difference is focus: Yomitan excels at dictionary lookups, while LLT is
 
 | | Yomitan | LLT |
 |---|---|---|
-| Translation source | Local dictionaries | Google Translate or local Bergamot |
+| Translation source | Local dictionaries | Google Translate, MyMemory, Microsoft Translator, DeepL, or local Bergamot |
 | Primary strength | Rich word lookup | Phrases, collocations, and sentences |
 | Anki workflow | Mature integration | Local queue and AnkiConnect synchronization |
 | Required infrastructure | None | No server; AnkiConnect is only needed for automatic synchronization |
@@ -129,7 +129,13 @@ pnpm --filter @app/extension dev
 
 Load the unpacked extension from `apps/extension/dist_chrome`.
 
-Google Translate is selected by default. To use offline translation, open LLT settings, select Bergamot, and download the `en → ru` model pack (approximately 15 MB).
+Open LLT settings, choose a translation provider, and save. The choice applies to both the popup and page selections.
+
+- **Google Translate** is the default and works without a key.
+- **MyMemory** works without a key and accepts up to 500 UTF-8 bytes per request. An optional reachable contact email raises the daily allowance from 5,000 to 50,000 characters. If you use Gmail, settings can generate a stable alias that delivers to your inbox. [MyMemory usage limits](https://mymemory.translated.net/doc/usagelimits.php)
+- **Microsoft Translator** requires an Azure Translator key. Enter the region for a regional or multi-service resource. The extension stores these settings on the current device. [Azure setup](https://learn.microsoft.com/en-us/azure/cognitive-services/translator/quickstart-translator)
+- **DeepL** uses the official local proxy. Configure your DeepL API key in the proxy and start it on port 3000 before translating. [DeepL proxy setup](https://github.com/DeepL/deepl-api-nodejs-proxy)
+- **Bergamot** runs offline once you download the `en → ru` model pack (approximately 15 MB).
 
 ### Verification
 
@@ -166,7 +172,7 @@ pnpm --filter @app/api dev          # http://localhost:3000
 ## Technology
 
 - **Extension:** React 19, TypeScript, Vite, Tailwind CSS, Manifest V3
-- **Translation:** Google Translate, Bergamot WASM
+- **Translation:** Google Translate, MyMemory, Microsoft Translator, DeepL, Bergamot WASM
 - **Pronunciation:** Google Translate web TTS, Kokoro, ONNX Runtime Web, Web Speech API
 - **Anki:** AnkiConnect, TSV/CSV export
 - **Optional API:** Fastify, TypeScript

@@ -2,6 +2,15 @@
 
 All notable changes to Learn Lang Tool are documented in this file.
 
+## 1.0.9 - 2026-11-22
+
+### Improvements
+
+- Choose MyMemory, Microsoft Translator, or DeepL for translations from the toolbar and page selections.
+- Translate with MyMemory anonymously or enter a reachable contact email for its higher daily allowance. Gmail users can generate a stable alias for their existing inbox.
+- See MyMemory’s 500-byte UTF-8 limit in the toolbar and choose an explicit source language.
+- Use your Azure Translator key on the current device or connect DeepL through its local proxy.
+
 ## 1.0.8 - 2026-10-04
 
 ### Improvements

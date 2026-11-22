@@ -11,6 +11,7 @@ const LANGUAGES: Record<string, string> = {
 interface LanguagePairSelectProps {
   pair: LanguagePair;
   disabled?: boolean;
+  allowAutoSource?: boolean;
   onChange: (pair: LanguagePair) => void;
   onSwap: () => void;
   className?: string;
@@ -20,7 +21,7 @@ interface LanguagePairSelectProps {
 }
 
 export function LanguagePairSelect({
-  pair, disabled, onChange, onSwap, className = '', fieldClassName = '',
+  pair, disabled, allowAutoSource = true, onChange, onSwap, className = '', fieldClassName = '',
   selectClassName, swapClassName,
 }: LanguagePairSelectProps) {
   const id = useId();
@@ -38,7 +39,7 @@ export function LanguagePairSelect({
         <label htmlFor={`${id}-source`}>Source language</label>
         <select id={`${id}-source`} className={selectClassName} value={pair.from_code}
           disabled={disabled} onChange={event => onChange({ ...pair, from_code: event.target.value })}>
-          <option value="auto">Auto-Detect</option>
+          {allowAutoSource && <option value="auto">Auto-Detect</option>}
           {options}
         </select>
       </div>

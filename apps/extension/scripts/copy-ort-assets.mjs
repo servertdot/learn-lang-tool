@@ -19,7 +19,7 @@ const FILES = [
 function resolveOrtSourceDir() {
   try {
     const transformersEntry = require.resolve('@huggingface/transformers');
-    const dist = join(dirname(transformersEntry), 'dist');
+    const dist = dirname(transformersEntry);
     if (FILES.every(file => existsSync(join(dist, file)))) {
       return dist;
     }
@@ -32,7 +32,7 @@ function resolveOrtSourceDir() {
     const transformersEntry = require.resolve('@huggingface/transformers', {
       paths: [kokoroDir],
     });
-    const dist = join(dirname(transformersEntry), 'dist');
+    const dist = dirname(transformersEntry);
     if (FILES.every(file => existsSync(join(dist, file)))) {
       return dist;
     }
@@ -45,8 +45,7 @@ function resolveOrtSourceDir() {
 
 const src = resolveOrtSourceDir();
 if (!src) {
-  console.warn('[copy-ort-assets] ORT WASM source not found; skip');
-  process.exit(0);
+  throw new Error('[copy-ort-assets] Required ORT WASM assets are missing from the installed Transformers.js package.');
 }
 
 mkdirSync(dest, { recursive: true });

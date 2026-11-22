@@ -4,6 +4,8 @@ import {
   DEFAULT_LANGUAGE_PAIR,
   DEFAULT_HOTKEY,
   DEFAULT_TRANSLATION_PROVIDER,
+  isTranslationProvider,
+  supportsAutoSource,
 } from '@package/shared';
 import {
   DEFAULT_ANKI_SETTINGS,
@@ -23,7 +25,7 @@ export async function getLanguagePair(): Promise<LanguagePair> {
   const result = await browser.storage.sync.get(KEYS.languagePair);
   const pair = normalizeLanguagePair(result[KEYS.languagePair] as LanguagePair | undefined);
   const provider = await getTranslationProvider();
-  return provider === 'bergamot' && pair.from_code === 'auto'
+  return !supportsAutoSource(provider) && pair.from_code === 'auto'
     ? { ...pair, from_code: 'en' }
     : pair;
 }
@@ -39,7 +41,7 @@ function normalizeLanguagePair(pair: LanguagePair | undefined): LanguagePair {
 
 export async function setLanguagePair(pair: LanguagePair): Promise<LanguagePair> {
   const next = normalizeLanguagePair(pair);
-  if (await getTranslationProvider() === 'bergamot' && next.from_code === 'auto') {
+  if (!supportsAutoSource(await getTranslationProvider()) && next.from_code === 'auto') {
     next.from_code = 'en';
   }
   await browser.storage.sync.set({ [KEYS.languagePair]: next });
@@ -67,14 +69,24 @@ export async function setHotkey(hotkey: string): Promise<void> {
 export async function getTranslationProvider(): Promise<TranslationProvider> {
   const result = await browser.storage.sync.get(KEYS.translationProvider);
   const provider = result[KEYS.translationProvider];
-  return provider === 'bergamot' || provider === 'google'
+  return isTranslationProvider(provider)
     ? provider
     : DEFAULT_TRANSLATION_PROVIDER;
 }
 
+export function subscribeTranslationProvider(onChange: (provider: TranslationProvider) => void): () => void {
+  const listener = (changes: Record<string, browser.Storage.StorageChange>, area: string) => {
+    if (area !== 'sync' || !changes[KEYS.translationProvider]) return;
+    const provider = changes[KEYS.translationProvider].newValue;
+    onChange(isTranslationProvider(provider) ? provider : DEFAULT_TRANSLATION_PROVIDER);
+  };
+  browser.storage.onChanged.addListener(listener);
+  return () => browser.storage.onChanged.removeListener(listener);
+}
+
 export async function setTranslationProvider(provider: TranslationProvider): Promise<void> {
   const values: Record<string, unknown> = { [KEYS.translationProvider]: provider };
-  if (provider === 'bergamot') {
+  if (!supportsAutoSource(provider)) {
     const stored = await browser.storage.sync.get(KEYS.languagePair);
     const pair = normalizeLanguagePair(stored[KEYS.languagePair] as LanguagePair | undefined);
     if (pair.from_code === 'auto') values[KEYS.languagePair] = { ...pair, from_code: 'en' };

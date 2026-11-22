@@ -1,4 +1,5 @@
 import { MAX_TRANSLATION_TEXT_LENGTH } from '@package/shared';
+import { readBoundedText } from './read-bounded-text';
 import { getGoogleTranslateToken } from '../vendor/googletrans/google-token';
 
 const GOOGLE_TRANSLATE_URL = 'https://translate.google.com/translate_a/single';
@@ -49,42 +50,6 @@ function buildRequestUrl(text: string, fromCode: string, toCode: string): string
   params.set('q', text);
   params.set('tk', getGoogleTranslateToken(text));
   return url.toString();
-}
-
-async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
-  const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    throw new GoogleTranslationError('response', 'Google Translate response is too large');
-  }
-
-  if (!response.body) {
-    const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > maxBytes) {
-      throw new GoogleTranslationError('response', 'Google Translate response is too large');
-    }
-    return text;
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let totalBytes = 0;
-  let text = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      totalBytes += value.byteLength;
-      if (totalBytes > maxBytes) {
-        await reader.cancel();
-        throw new GoogleTranslationError('response', 'Google Translate response is too large');
-      }
-      text += decoder.decode(value, { stream: true });
-    }
-    return text + decoder.decode();
-  } finally {
-    reader.releaseLock();
-  }
 }
 
 export interface GoogleTranslationResult {
@@ -163,7 +128,11 @@ export async function translateWithGoogle(
       );
     }
 
-    const rawText = await readBoundedText(response, maxResponseBytes);
+    const rawText = await readBoundedText(
+      response,
+      maxResponseBytes,
+      new GoogleTranslationError('response', 'Google Translate response is too large'),
+    );
     let payload: unknown;
     try {
       payload = JSON.parse(rawText);
